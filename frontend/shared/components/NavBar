@@ -1,0 +1,76 @@
+/**
+ * Shared top navigation.
+ *
+ * Foundation-phase only — no auth state, no role-based rendering yet.
+ * Per docs/MASTER_SPEC.md §32, the auth provider and RBAC matrix are
+ * explicitly not yet frozen, so this component must not assume either.
+ */
+
+import Link from "next/link";
+
+const SIDES = [
+  { href: "/worker", label: "Worker", accentVar: "--worker-accent" },
+  { href: "/admin", label: "Admin", accentVar: "--admin-accent" },
+  { href: "/organization", label: "Organization", accentVar: "--organization-accent" },
+];
+
+export function NavBar({ active }: { active?: "worker" | "admin" | "organization" }) {
+  return (
+    <nav
+      aria-label="AMAP product sides"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        padding: "1rem 2rem",
+        borderBottom: "1px solid var(--border)",
+        background: "var(--surface-1)",
+      }}
+    >
+      <Link
+        href="/"
+        style={{
+          fontFamily: "var(--font-display)",
+          fontWeight: 700,
+          fontSize: "1.1rem",
+          textDecoration: "none",
+        }}
+      >
+        AMAP
+      </Link>
+
+      <ul
+        style={{
+          display: "flex",
+          gap: "1.5rem",
+          listStyle: "none",
+          margin: 0,
+          padding: 0,
+        }}
+      >
+        {SIDES.map((side) => {
+          const isActive = active === side.label.toLowerCase();
+          return (
+            <li key={side.href}>
+              <Link
+                href={side.href}
+                aria-current={isActive ? "page" : undefined}
+                style={{
+                  textDecoration: "none",
+                  fontSize: "0.95rem",
+                  color: isActive ? "var(--text-primary)" : "var(--text-secondary)",
+                  paddingBottom: "0.35rem",
+                  borderBottom: isActive
+                    ? `2px solid var(${side.accentVar})`
+                    : "2px solid transparent",
+                }}
+              >
+                {side.label}
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
