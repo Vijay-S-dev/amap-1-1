@@ -1,0 +1,80 @@
+/**
+ * SideScaffold — shared shell for a product-side placeholder page.
+ *
+ * This deliberately renders a "foundation" state, not real business UI.
+ * Worker/Admin/Organization screens require API contracts, an RBAC
+ * matrix, and an auth provider — all explicitly not yet frozen per
+ * docs/MASTER_SPEC.md §32. Building real screens ahead of those
+ * decisions would mean an AI assistant inventing architecture, which
+ * §28 rules out.
+ */
+
+import { NavBar } from "./NavBar";
+
+type Side = "worker" | "admin" | "organization";
+
+const ACCENT_VAR: Record<Side, string> = {
+  worker: "--worker-accent",
+  admin: "--admin-accent",
+  organization: "--organization-accent",
+};
+
+export function SideScaffold({
+  side,
+  title,
+  description,
+  upcoming,
+}: {
+  side: Side;
+  title: string;
+  description: string;
+  upcoming: string[];
+}) {
+  return (
+    <>
+      <NavBar active={side} />
+      <main style={{ maxWidth: "760px", margin: "0 auto", padding: "3.5rem 2rem" }}>
+        <p
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "0.8rem",
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: `var(${ACCENT_VAR[side]})`,
+            marginBottom: "0.75rem",
+          }}
+        >
+          {side} side · foundation
+        </p>
+
+        <h1 style={{ fontSize: "2.25rem", marginBottom: "1rem" }}>{title}</h1>
+
+        <p style={{ color: "var(--text-secondary)", fontSize: "1.05rem", maxWidth: "58ch" }}>
+          {description}
+        </p>
+
+        <section
+          aria-label={`Planned ${side} capabilities`}
+          style={{
+            marginTop: "2.5rem",
+            padding: "1.5rem",
+            background: "var(--surface-1)",
+            border: "1px solid var(--border)",
+            borderRadius: "10px",
+          }}
+        >
+          <h2 style={{ fontSize: "1rem", marginBottom: "1rem", color: "var(--text-primary)" }}>
+            Planned, pending contract approval
+          </h2>
+          <ul style={{ margin: 0, paddingLeft: "1.25rem", color: "var(--text-secondary)" }}>
+            {upcoming.map((item) => (
+              <li key={item} style={{ marginBottom: "0.5rem" }}>
+                {item}
+              </li>
+            ))}
+          </ul>
+        </section>
+      </main>
+    </>
+  );
+}
