@@ -29,3 +29,31 @@ class OrganizationsRepository:
                     (organization_id,),
                 )
                 return cursor.fetchone()
+
+    def get_by_name(self, name: str) -> dict[str, Any] | None:
+        """Return an organization by its name, or None if it does not exist."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, name, status, created_at, updated_at
+                    FROM organizations
+                    WHERE name = %s
+                    """,
+                    (name,),
+                )
+                return cursor.fetchone()
+   
+
+
+
+
+
+
+
+
+
+
+
+
+
