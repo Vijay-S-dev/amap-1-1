@@ -17,7 +17,7 @@ from app.error_handlers import register_error_handlers
 from middleware.logging_middleware import RequestLoggingMiddleware
 from middleware.request_id import RequestIDMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware
-from routes.v1 import api_v1_router
+from routes import api_v1_router
 from utils.logger import configure_logging, get_logger
 
 
