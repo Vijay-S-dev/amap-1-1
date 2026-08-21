@@ -7,9 +7,6 @@ Per docs/BACKEND.md §10 (Configuration Rules):
 - Required settings are validated at startup.
 - Dev/prod concerns are separated via ENVIRONMENT.
 
-This module intentionally does NOT define any database settings.
-Database configuration is owned by docs/DATABASE.md and will be
-introduced only after the database foundation phase is approved.
 """
 
 import os
@@ -32,6 +29,10 @@ class Settings:
 
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
+                # Database configuration.
+        # The PostgreSQL schema and migration foundation are now implemented,
+        # so backend database integration can be configured here.
+        self.database_url: str = os.getenv("DATABASE_URL", "")
         # CORS is environment-driven per BACKEND.md §16.
         # In development, a sane localhost default is provided.
         # In production, CORS_ALLOWED_ORIGINS MUST be explicitly set —
@@ -50,7 +51,21 @@ class Settings:
             return ["http://localhost:3000", "http://127.0.0.1:3000"]
         return []
 
-    def _validate(self) -> None:
+       def _validate(self) -> None:
+        """
+        Validate required application settings.
+        """
+        if self.environment == "production" and not self.cors_allowed_origins:
+            raise RuntimeError(
+                "CORS_ALLOWED_ORIGINS must be explicitly set when "
+                "ENVIRONMENT=production. Refusing to start with an "
+                "unrestricted or empty CORS configuration in production."
+            )
+
+        if not self.database_url:
+            raise RuntimeError(
+                "DATABASE_URL must be explicitly set."
+            )
         """
         Validate required settings appropriately (BACKEND.md §10).
 
