@@ -57,13 +57,39 @@ class OrganizationsRepository:
                 )
                 return list(cursor.fetchall())
 
+    def create(self, name: str) -> dict[str, Any]:
+        """Create and return an organization."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO organizations (name)
+                    VALUES (%s)
+                    RETURNING id, name, status, created_at, updated_at
+                    """,
+                    (name,),
+                )
+                organization = cursor.fetchone()
+                connection.commit()
 
+                return organization
 
+    def delete_by_id(self, organization_id: UUID) -> bool:
+        """
+        Delete an organization by ID.
 
+        Returns True if an organization was deleted, otherwise False.
+        """
+        with get_db_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    DELETE FROM organizations
+                    WHERE id = %s
+                    """,
+                    (organization_id,),
+                )
+                deleted = cursor.rowcount == 1
+                connection.commit()
 
-
-
-
-
-
-
+                return deleted
