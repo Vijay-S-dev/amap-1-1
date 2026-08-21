@@ -7,6 +7,8 @@ Per docs/BACKEND.md §10 (Configuration Rules):
 - Required settings are validated at startup.
 - Dev/prod concerns are separated via ENVIRONMENT.
 
+Database configuration is included because the PostgreSQL schema and
+migration foundation are now implemented and approved for backend integration.
 """
 
 import os
@@ -17,9 +19,6 @@ from typing import List
 class Settings:
     """
     Centralized application settings, sourced from environment variables.
-
-    Only foundation-phase settings live here (see BACKEND.md §6/§7).
-    Do not add business-specific or database settings to this class.
     """
 
     def __init__(self) -> None:
@@ -29,14 +28,12 @@ class Settings:
 
         self.log_level: str = os.getenv("LOG_LEVEL", "INFO")
 
-                # Database configuration.
-        # The PostgreSQL schema and migration foundation are now implemented,
-        # so backend database integration can be configured here.
+        # Database configuration.
         self.database_url: str = os.getenv("DATABASE_URL", "")
+
         # CORS is environment-driven per BACKEND.md §16.
         # In development, a sane localhost default is provided.
-        # In production, CORS_ALLOWED_ORIGINS MUST be explicitly set —
-        # unrestricted origins are never allowed permanently in prod.
+        # In production, CORS_ALLOWED_ORIGINS must be explicitly set.
         raw_origins = os.getenv("CORS_ALLOWED_ORIGINS", "")
         self.cors_allowed_origins: List[str] = (
             [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
@@ -48,13 +45,15 @@ class Settings:
 
     def _default_dev_origins(self) -> List[str]:
         if self.environment == "development":
-            return ["http://localhost:3000", "http://127.0.0.1:3000"]
+            return [
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+            ]
         return []
 
-       def _validate(self) -> None:
-        """
-        Validate required application settings.
-        """
+    def _validate(self) -> None:
+        """Validate required application settings."""
+
         if self.environment == "production" and not self.cors_allowed_origins:
             raise RuntimeError(
                 "CORS_ALLOWED_ORIGINS must be explicitly set when "
@@ -63,21 +62,7 @@ class Settings:
             )
 
         if not self.database_url:
-            raise RuntimeError(
-                "DATABASE_URL must be explicitly set."
-            )
-        """
-        Validate required settings appropriately (BACKEND.md §10).
-
-        Kept intentionally minimal in the foundation phase — there are no
-        secrets, database URLs, or auth settings to validate yet.
-        """
-        if self.environment == "production" and not self.cors_allowed_origins:
-            raise RuntimeError(
-                "CORS_ALLOWED_ORIGINS must be explicitly set when "
-                "ENVIRONMENT=production. Refusing to start with an "
-                "unrestricted or empty CORS configuration in production."
-            )
+            raise RuntimeError("DATABASE_URL must be explicitly set.")
 
     @property
     def is_production(self) -> bool:
@@ -88,4 +73,3 @@ class Settings:
 def get_settings() -> Settings:
     """Cached settings accessor — avoids re-reading env vars on every call."""
     return Settings()
-
