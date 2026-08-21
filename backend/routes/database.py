@@ -1,3 +1,4 @@
+"""
 Database health endpoint.
 
 Verifies that the backend can connect to PostgreSQL.
@@ -17,6 +18,9 @@ def database_health(connection: Connection = Depends(get_db)) -> dict:
     """Verify PostgreSQL connectivity."""
     with connection.cursor() as cursor:
         cursor.execute("SELECT 1")
-        cursor.fetchone()
+        result = cursor.fetchone()
+
+    if result != (1,):
+        return {"status": "error"}
 
     return {"status": "ok"}
