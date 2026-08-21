@@ -17,3 +17,10 @@ def test_get_by_name_returns_none_for_unknown_organization():
     result = repository.get_by_name(f"unknown-org-{uuid4()}")
 
     assert result is None
+
+def test_list_all_returns_a_list():
+    repository = OrganizationsRepository()
+
+    result = repository.list_all()
+
+    assert isinstance(result, list)
