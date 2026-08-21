@@ -43,9 +43,19 @@ class OrganizationsRepository:
                     (name,),
                 )
                 return cursor.fetchone()
-   
 
-
+    def list_all(self) -> list[dict[str, Any]]:
+        """Return all organizations ordered by name."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, name, status, created_at, updated_at
+                    FROM organizations
+                    ORDER BY name
+                    """
+                )
+                return list(cursor.fetchall())
 
 
 
