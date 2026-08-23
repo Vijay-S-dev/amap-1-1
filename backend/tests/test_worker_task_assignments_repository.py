@@ -34,9 +34,11 @@ def test_create_and_get_worker_task_assignment():
         organization = organizations.create(f"test-org-{uuid4()}")
 
         user = users.create(
-            organization["id"],
-            f"test-user-{uuid4()}@example.com",
-        )
+    organization["id"],
+    f"test-user-{uuid4()}@example.com",
+    "Test User",
+    "test-password-hash",
+)
 
         worker_profile = worker_profiles.create(user["id"])
 
