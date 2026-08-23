@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
 from app.database import get_db_connection
 
@@ -208,7 +209,7 @@ class AssistanceRequestsRepository:
                         worker_task_assignment_id,
                         priority,
                         reason,
-                        request_data or {},
+                        Jsonb(request_data or {}),
                     ),
                 )
 
