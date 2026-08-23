@@ -1,0 +1,122 @@
+"""
+Workflow step responsibility repository.
+
+Provides database access operations for the workflow_step_responsibilities table.
+Business logic does not belong in this module.
+"""
+
+from typing import Any
+from uuid import UUID
+
+from psycopg.rows import dict_row
+
+from app.database import get_db_connection
+
+
+class WorkflowStepResponsibilitiesRepository:
+    """Data access operations for workflow step responsibilities."""
+
+    def get_by_ids(
+        self,
+        workflow_step_id: UUID,
+        responsibility_id: UUID,
+    ) -> dict[str, Any] | None:
+        """Return a workflow-step-responsibility link, or None if absent."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT workflow_step_id, responsibility_id, created_at
+                    FROM workflow_step_responsibilities
+                    WHERE workflow_step_id = %s
+                      AND responsibility_id = %s
+                    """,
+                    (workflow_step_id, responsibility_id),
+                )
+                return cursor.fetchone()
+
+    def list_by_workflow_step_id(
+        self,
+        workflow_step_id: UUID,
+    ) -> list[dict[str, Any]]:
+        """Return all responsibility links for a workflow step."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT workflow_step_id, responsibility_id, created_at
+                    FROM workflow_step_responsibilities
+                    WHERE workflow_step_id = %s
+                    ORDER BY created_at
+                    """,
+                    (workflow_step_id,),
+                )
+                return cursor.fetchall()
+
+    def list_by_responsibility_id(
+        self,
+        responsibility_id: UUID,
+    ) -> list[dict[str, Any]]:
+        """Return all workflow step links for a responsibility."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT workflow_step_id, responsibility_id, created_at
+                    FROM workflow_step_responsibilities
+                    WHERE responsibility_id = %s
+                    ORDER BY created_at
+                    """,
+                    (responsibility_id,),
+                )
+                return cursor.fetchall()
+
+    def create(
+        self,
+        workflow_step_id: UUID,
+        responsibility_id: UUID,
+    ) -> dict[str, Any]:
+        """Create and return a workflow-step-responsibility link."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO workflow_step_responsibilities (
+                        workflow_step_id,
+                        responsibility_id
+                    )
+                    VALUES (%s, %s)
+                    RETURNING
+                        workflow_step_id,
+                        responsibility_id,
+                        created_at
+                    """,
+                    (workflow_step_id, responsibility_id),
+                )
+
+                link = cursor.fetchone()
+                connection.commit()
+
+                return link
+
+    def delete(
+        self,
+        workflow_step_id: UUID,
+        responsibility_id: UUID,
+    ) -> bool:
+        """Delete a workflow-step-responsibility link."""
+        with get_db_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    DELETE FROM workflow_step_responsibilities
+                    WHERE workflow_step_id = %s
+                      AND responsibility_id = %s
+                    """,
+                    (workflow_step_id, responsibility_id),
+                )
+
+                deleted = cursor.rowcount == 1
+                connection.commit()
+
+                return deleted
