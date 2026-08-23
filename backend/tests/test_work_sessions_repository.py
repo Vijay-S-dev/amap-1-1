@@ -307,15 +307,17 @@ def test_delete_by_id_returns_true_for_existing_work_session():
             worker_profile["id"],
         )
 
+        work_session_id = work_session["id"]
+
         deleted = repository.delete_by_id(
-            work_session["id"],
+            work_session_id,
         )
 
         assert deleted is True
         work_session = None
 
         assert repository.get_by_id(
-            work_session["id"]
+            work_session_id
         ) is None
 
     finally:
