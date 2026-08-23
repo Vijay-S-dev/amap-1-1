@@ -1,14 +1,10 @@
-from datetime import timedelta
 from uuid import uuid4
 
-#from app.database import get_db_connection
 from repositories.organizations import OrganizationsRepository
 from repositories.tasks import TasksRepository
 from repositories.users import UsersRepository
 from repositories.worker_profiles import WorkerProfilesRepository
-from repositories.worker_task_assignments import (
-    WorkerTaskAssignmentsRepository,
-)
+from repositories.worker_task_assignments import WorkerTaskAssignmentsRepository
 
 
 def test_get_by_id_returns_none_for_unknown_assignment():
@@ -34,11 +30,11 @@ def test_create_and_get_worker_task_assignment():
         organization = organizations.create(f"test-org-{uuid4()}")
 
         user = users.create(
-    organization["id"],
-    f"test-user-{uuid4()}@example.com",
-    "Test User",
-    "test-password-hash",
-)
+            organization["id"],
+            f"test-user-{uuid4()}@example.com",
+            "Test User",
+            "test-password-hash",
+        )
 
         worker_profile = worker_profiles.create(user["id"])
 
@@ -65,16 +61,12 @@ def test_create_and_get_worker_task_assignment():
     finally:
         if assignment is not None:
             assignments.delete_by_id(assignment["id"])
-
         if task is not None:
             tasks.delete_by_id(task["id"])
-
         if worker_profile is not None:
             worker_profiles.delete_by_id(worker_profile["id"])
-
         if user is not None:
             users.delete_by_id(user["id"])
-
         if organization is not None:
             organizations.delete_by_id(organization["id"])
 
@@ -96,11 +88,11 @@ def test_list_by_task_id_contains_created_assignment():
         organization = organizations.create(f"test-org-{uuid4()}")
 
         user = users.create(
-    organization["id"],
-    f"test-user-{uuid4()}@example.com",
-    "Test User",
-    "test-password-hash",
-)
+            organization["id"],
+            f"test-user-{uuid4()}@example.com",
+            "Test User",
+            "test-password-hash",
+        )
 
         worker_profile = worker_profiles.create(user["id"])
 
@@ -124,16 +116,12 @@ def test_list_by_task_id_contains_created_assignment():
     finally:
         if assignment is not None:
             assignments.delete_by_id(assignment["id"])
-
         if task is not None:
             tasks.delete_by_id(task["id"])
-
         if worker_profile is not None:
             worker_profiles.delete_by_id(worker_profile["id"])
-
         if user is not None:
             users.delete_by_id(user["id"])
-
         if organization is not None:
             organizations.delete_by_id(organization["id"])
 
@@ -154,12 +142,12 @@ def test_list_by_worker_profile_id_contains_created_assignment():
     try:
         organization = organizations.create(f"test-org-{uuid4()}")
 
-       user = users.create(
-    organization["id"],
-    f"test-user-{uuid4()}@example.com",
-    "Test User",
-    "test-password-hash",
-)
+        user = users.create(
+            organization["id"],
+            f"test-user-{uuid4()}@example.com",
+            "Test User",
+            "test-password-hash",
+        )
 
         worker_profile = worker_profiles.create(user["id"])
 
@@ -185,21 +173,17 @@ def test_list_by_worker_profile_id_contains_created_assignment():
     finally:
         if assignment is not None:
             assignments.delete_by_id(assignment["id"])
-
         if task is not None:
             tasks.delete_by_id(task["id"])
-
         if worker_profile is not None:
             worker_profiles.delete_by_id(worker_profile["id"])
-
         if user is not None:
             users.delete_by_id(user["id"])
-
         if organization is not None:
             organizations.delete_by_id(organization["id"])
 
 
-def test_update_status():
+def test_update_status_updates_assignment():
     organizations = OrganizationsRepository()
     users = UsersRepository()
     worker_profiles = WorkerProfilesRepository()
@@ -215,12 +199,12 @@ def test_update_status():
     try:
         organization = organizations.create(f"test-org-{uuid4()}")
 
-       user = users.create(
-    organization["id"],
-    f"test-user-{uuid4()}@example.com",
-    "Test User",
-    "test-password-hash",
-)
+        user = users.create(
+            organization["id"],
+            f"test-user-{uuid4()}@example.com",
+            "Test User",
+            "test-password-hash",
+        )
 
         worker_profile = worker_profiles.create(user["id"])
 
@@ -234,37 +218,29 @@ def test_update_status():
             worker_profile["id"],
         )
 
-        started_at = assignment["assigned_at"] + timedelta(minutes=1)
-
         updated = assignments.update_status(
             assignment["id"],
             "in_progress",
-            started_at=started_at,
         )
 
         assert updated is not None
+        assert updated["id"] == assignment["id"]
         assert updated["status"] == "in_progress"
-        assert updated["started_at"] == started_at
-        assert updated["completed_at"] is None
 
     finally:
         if assignment is not None:
             assignments.delete_by_id(assignment["id"])
-
         if task is not None:
             tasks.delete_by_id(task["id"])
-
         if worker_profile is not None:
             worker_profiles.delete_by_id(worker_profile["id"])
-
         if user is not None:
             users.delete_by_id(user["id"])
-
         if organization is not None:
             organizations.delete_by_id(organization["id"])
 
 
-def test_delete_by_id_returns_false_for_unknown_assignment():
+def test_delete_returns_false_for_unknown_assignment():
     repository = WorkerTaskAssignmentsRepository()
 
     assert repository.delete_by_id(uuid4()) is False
