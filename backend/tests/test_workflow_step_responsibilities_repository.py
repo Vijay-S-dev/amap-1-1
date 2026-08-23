@@ -20,7 +20,9 @@ def test_create_and_get_workflow_step_responsibility():
     workflows = WorkflowsRepository()
     workflow_steps = WorkflowStepsRepository()
     responsibilities = ResponsibilitiesRepository()
-    workflow_step_responsibilities = WorkflowStepResponsibilitiesRepository()
+    workflow_step_responsibilities = (
+        WorkflowStepResponsibilitiesRepository()
+    )
 
     organization = None
     workflow = None
@@ -29,7 +31,9 @@ def test_create_and_get_workflow_step_responsibility():
     link = None
 
     try:
-        organization = organizations.create(f"test-org-{uuid4()}")
+        organization = organizations.create(
+            f"test-org-{uuid4()}"
+        )
 
         workflow = workflows.create(
             organization["id"],
@@ -73,16 +77,24 @@ def test_create_and_get_workflow_step_responsibility():
             )
 
         if responsibility is not None:
-            responsibilities.delete_by_id(responsibility["id"])
+            responsibilities.delete_by_id(
+                responsibility["id"]
+            )
 
         if workflow_step is not None:
-            workflow_steps.delete_by_id(workflow_step["id"])
+            workflow_steps.delete_by_id(
+                workflow_step["id"]
+            )
 
         if workflow is not None:
-            workflows.delete_by_id(workflow["id"])
+            workflows.delete_by_id(
+                workflow["id"]
+            )
 
         if organization is not None:
-            organizations.delete_by_id(organization["id"])
+            organizations.delete_by_id(
+                organization["id"]
+            )
 
 
 def test_list_by_workflow_step_id_contains_created_link():
@@ -90,7 +102,9 @@ def test_list_by_workflow_step_id_contains_created_link():
     workflows = WorkflowsRepository()
     workflow_steps = WorkflowStepsRepository()
     responsibilities = ResponsibilitiesRepository()
-    workflow_step_responsibilities = WorkflowStepResponsibilitiesRepository()
+    workflow_step_responsibilities = (
+        WorkflowStepResponsibilitiesRepository()
+    )
 
     organization = None
     workflow = None
@@ -99,7 +113,9 @@ def test_list_by_workflow_step_id_contains_created_link():
     link = None
 
     try:
-        organization = organizations.create(f"test-org-{uuid4()}")
+        organization = organizations.create(
+            f"test-org-{uuid4()}"
+        )
 
         workflow = workflows.create(
             organization["id"],
@@ -123,9 +139,8 @@ def test_list_by_workflow_step_id_contains_created_link():
         )
 
         results = (
-            workflow_step_responsibilities.list_by_workflow_step_id(
-                workflow_step["id"],
-            )
+            workflow_step_responsibilities
+            .list_by_workflow_step_id(workflow_step["id"])
         )
 
         assert any(
@@ -141,16 +156,24 @@ def test_list_by_workflow_step_id_contains_created_link():
             )
 
         if responsibility is not None:
-            responsibilities.delete_by_id(responsibility["id"])
+            responsibilities.delete_by_id(
+                responsibility["id"]
+            )
 
         if workflow_step is not None:
-            workflow_steps.delete_by_id(workflow_step["id"])
+            workflow_steps.delete_by_id(
+                workflow_step["id"]
+            )
 
         if workflow is not None:
-            workflows.delete_by_id(workflow["id"])
+            workflows.delete_by_id(
+                workflow["id"]
+            )
 
         if organization is not None:
-            organizations.delete_by_id(organization["id"])
+            organizations.delete_by_id(
+                organization["id"]
+            )
 
 
 def test_list_by_responsibility_id_contains_created_link():
@@ -158,7 +181,9 @@ def test_list_by_responsibility_id_contains_created_link():
     workflows = WorkflowsRepository()
     workflow_steps = WorkflowStepsRepository()
     responsibilities = ResponsibilitiesRepository()
-    workflow_step_responsibilities = WorkflowStepResponsibilitiesRepository()
+    workflow_step_responsibilities = (
+        WorkflowStepResponsibilitiesRepository()
+    )
 
     organization = None
     workflow = None
@@ -167,7 +192,9 @@ def test_list_by_responsibility_id_contains_created_link():
     link = None
 
     try:
-        organization = organizations.create(f"test-org-{uuid4()}")
+        organization = organizations.create(
+            f"test-org-{uuid4()}"
+        )
 
         workflow = workflows.create(
             organization["id"],
@@ -191,9 +218,8 @@ def test_list_by_responsibility_id_contains_created_link():
         )
 
         results = (
-            workflow_step_responsibilities.list_by_responsibility_id(
-                responsibility["id"],
-            )
+            workflow_step_responsibilities
+            .list_by_responsibility_id(responsibility["id"])
         )
 
         assert any(
@@ -209,16 +235,24 @@ def test_list_by_responsibility_id_contains_created_link():
             )
 
         if responsibility is not None:
-            responsibilities.delete_by_id(responsibility["id"])
+            responsibilities.delete_by_id(
+                responsibility["id"]
+            )
 
         if workflow_step is not None:
-            workflow_steps.delete_by_id(workflow_step["id"])
+            workflow_steps.delete_by_id(
+                workflow_step["id"]
+            )
 
         if workflow is not None:
-            workflows.delete_by_id(workflow["id"])
+            workflows.delete_by_id(
+                workflow["id"]
+            )
 
         if organization is not None:
-            organizations.delete_by_id(organization["id"])
+            organizations.delete_by_id(
+                organization["id"]
+            )
 
 
 def test_delete_returns_false_for_unknown_link():
