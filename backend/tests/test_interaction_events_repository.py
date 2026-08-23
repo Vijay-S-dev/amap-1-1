@@ -1,3 +1,4 @@
+from decimal import Decimal
 from uuid import uuid4
 
 from repositories.actions import ActionsRepository
@@ -92,7 +93,7 @@ def test_create_and_get_interaction_event():
     )
     assert fetched_event["interaction_mode"] == "gesture"
     assert fetched_event["event_type"] == "recognized"
-    assert fetched_event["confidence"] == 0.9500
+    assert fetched_event["confidence"] == Decimal("0.9500")
     assert fetched_event["interaction_data"] == {"source": "test"}
 
 
