@@ -1,5 +1,4 @@
 from uuid import uuid4
-
 from repositories.organizations import OrganizationsRepository
 from repositories.tasks import TasksRepository
 from repositories.task_results import TaskResultsRepository
