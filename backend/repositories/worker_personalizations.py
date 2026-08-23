@@ -41,6 +41,32 @@ class WorkerPersonalizationsRepository:
                 )
                 return cursor.fetchone()
 
+    def get_by_worker_profile_id(
+        self,
+        worker_profile_id: UUID,
+    ) -> dict[str, Any] | None:
+        """Return the first personalization for a worker profile, or None."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        worker_profile_id,
+                        interaction_configuration_id,
+                        personalization_data,
+                        status,
+                        created_at,
+                        updated_at
+                    FROM worker_personalizations
+                    WHERE worker_profile_id = %s
+                    ORDER BY created_at
+                    LIMIT 1
+                    """,
+                    (worker_profile_id,),
+                )
+                return cursor.fetchone()
+
     def list_by_worker_profile_id(
         self,
         worker_profile_id: UUID,
@@ -63,6 +89,31 @@ class WorkerPersonalizationsRepository:
                     ORDER BY created_at
                     """,
                     (worker_profile_id,),
+                )
+                return list(cursor.fetchall())
+
+    def list_by_status(
+        self,
+        status: str,
+    ) -> list[dict[str, Any]]:
+        """Return all worker personalizations with the given status."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        id,
+                        worker_profile_id,
+                        interaction_configuration_id,
+                        personalization_data,
+                        status,
+                        created_at,
+                        updated_at
+                    FROM worker_personalizations
+                    WHERE status = %s
+                    ORDER BY created_at
+                    """,
+                    (status,),
                 )
                 return list(cursor.fetchall())
 
@@ -141,6 +192,41 @@ class WorkerPersonalizationsRepository:
                     (
                         interaction_configuration_id,
                         Jsonb(personalization_data),
+                        status,
+                        worker_personalization_id,
+                    ),
+                )
+
+                worker_personalization = cursor.fetchone()
+                connection.commit()
+
+                return worker_personalization
+
+    def update_status(
+        self,
+        worker_personalization_id: UUID,
+        status: str,
+    ) -> dict[str, Any] | None:
+        """Update only the status of a worker personalization."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    UPDATE worker_personalizations
+                    SET
+                        status = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING
+                        id,
+                        worker_profile_id,
+                        interaction_configuration_id,
+                        personalization_data,
+                        status,
+                        created_at,
+                        updated_at
+                    """,
+                    (
                         status,
                         worker_personalization_id,
                     ),
