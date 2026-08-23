@@ -96,9 +96,11 @@ def test_list_by_task_id_contains_created_assignment():
         organization = organizations.create(f"test-org-{uuid4()}")
 
         user = users.create(
-            organization["id"],
-            f"test-user-{uuid4()}@example.com",
-        )
+    organization["id"],
+    f"test-user-{uuid4()}@example.com",
+    "Test User",
+    "test-password-hash",
+)
 
         worker_profile = worker_profiles.create(user["id"])
 
@@ -152,10 +154,12 @@ def test_list_by_worker_profile_id_contains_created_assignment():
     try:
         organization = organizations.create(f"test-org-{uuid4()}")
 
-        user = users.create(
-            organization["id"],
-            f"test-user-{uuid4()}@example.com",
-        )
+       user = users.create(
+    organization["id"],
+    f"test-user-{uuid4()}@example.com",
+    "Test User",
+    "test-password-hash",
+)
 
         worker_profile = worker_profiles.create(user["id"])
 
@@ -211,10 +215,12 @@ def test_update_status():
     try:
         organization = organizations.create(f"test-org-{uuid4()}")
 
-        user = users.create(
-            organization["id"],
-            f"test-user-{uuid4()}@example.com",
-        )
+       user = users.create(
+    organization["id"],
+    f"test-user-{uuid4()}@example.com",
+    "Test User",
+    "test-password-hash",
+)
 
         worker_profile = worker_profiles.create(user["id"])
 
