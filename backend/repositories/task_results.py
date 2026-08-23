@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID
 
 from psycopg.rows import dict_row
-
+from psycopg.types.json import Jsonb
 from app.database import get_db_connection
 
 
@@ -126,12 +126,12 @@ class TaskResultsRepository:
                         created_at,
                         updated_at
                     """,
-                    (
-                        worker_task_assignment_id,
-                        outcome,
-                        result_data,
-                        notes,
-                    ),
+(
+    worker_task_assignment_id,
+    outcome,
+    Jsonb(result_data) if result_data is not None else None,
+    notes,
+),
                 )
 
                 task_result = cursor.fetchone()
@@ -168,12 +168,12 @@ class TaskResultsRepository:
                         created_at,
                         updated_at
                     """,
-                    (
-                        outcome,
-                        result_data,
-                        notes,
-                        task_result_id,
-                    ),
+                  (
+    outcome,
+    Jsonb(result_data) if result_data is not None else None,
+    notes,
+    task_result_id,
+),
                 )
 
                 task_result = cursor.fetchone()
