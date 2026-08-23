@@ -22,6 +22,7 @@ def create_dependencies():
     )
 
     user = users.create(
+        organization["id"],
         f"test-user-{uuid4()}@example.com",
         f"Test User {uuid4()}",
         f"test-password-hash-{uuid4()}",
@@ -198,7 +199,9 @@ def test_list_by_event_type_contains_created_event():
         event_type=event_type,
     )
 
-    events = repository.list_by_event_type(event_type)
+    events = repository.list_by_event_type(
+        event_type,
+    )
 
     event_ids = [item["id"] for item in events]
 
@@ -216,7 +219,9 @@ def test_delete_by_id_returns_true_for_existing_event():
         event_type="recognized",
     )
 
-    deleted = repository.delete_by_id(event["id"])
+    deleted = repository.delete_by_id(
+        event["id"],
+    )
 
     assert deleted is True
     assert repository.get_by_id(event["id"]) is None
@@ -225,6 +230,8 @@ def test_delete_by_id_returns_true_for_existing_event():
 def test_delete_by_id_returns_false_for_missing_event():
     repository = InteractionEventsRepository()
 
-    deleted = repository.delete_by_id(uuid4())
+    deleted = repository.delete_by_id(
+        uuid4(),
+    )
 
     assert deleted is False
