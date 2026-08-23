@@ -1,7 +1,8 @@
 """
 Workflow step responsibility repository.
 
-Provides database access operations for the workflow_step_responsibilities table.
+Provides database access operations for the
+workflow_step_responsibilities table.
 Business logic does not belong in this module.
 """
 
@@ -21,18 +22,22 @@ class WorkflowStepResponsibilitiesRepository:
         workflow_step_id: UUID,
         responsibility_id: UUID,
     ) -> dict[str, Any] | None:
-        """Return a workflow-step-responsibility link, or None if absent."""
+        """Return a workflow-step responsibility link, or None if absent."""
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
-                    SELECT workflow_step_id, responsibility_id, created_at
+                    SELECT
+                        workflow_step_id,
+                        responsibility_id,
+                        created_at
                     FROM workflow_step_responsibilities
                     WHERE workflow_step_id = %s
                       AND responsibility_id = %s
                     """,
                     (workflow_step_id, responsibility_id),
                 )
+
                 return cursor.fetchone()
 
     def list_by_workflow_step_id(
@@ -44,31 +49,39 @@ class WorkflowStepResponsibilitiesRepository:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
-                    SELECT workflow_step_id, responsibility_id, created_at
+                    SELECT
+                        workflow_step_id,
+                        responsibility_id,
+                        created_at
                     FROM workflow_step_responsibilities
                     WHERE workflow_step_id = %s
                     ORDER BY created_at
                     """,
                     (workflow_step_id,),
                 )
+
                 return cursor.fetchall()
 
     def list_by_responsibility_id(
         self,
         responsibility_id: UUID,
     ) -> list[dict[str, Any]]:
-        """Return all workflow step links for a responsibility."""
+        """Return all workflow-step links for a responsibility."""
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
-                    SELECT workflow_step_id, responsibility_id, created_at
+                    SELECT
+                        workflow_step_id,
+                        responsibility_id,
+                        created_at
                     FROM workflow_step_responsibilities
                     WHERE responsibility_id = %s
                     ORDER BY created_at
                     """,
                     (responsibility_id,),
                 )
+
                 return cursor.fetchall()
 
     def create(
@@ -76,7 +89,7 @@ class WorkflowStepResponsibilitiesRepository:
         workflow_step_id: UUID,
         responsibility_id: UUID,
     ) -> dict[str, Any]:
-        """Create and return a workflow-step-responsibility link."""
+        """Create and return a workflow-step responsibility link."""
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
@@ -94,17 +107,17 @@ class WorkflowStepResponsibilitiesRepository:
                     (workflow_step_id, responsibility_id),
                 )
 
-                link = cursor.fetchone()
+                workflow_step_responsibility = cursor.fetchone()
                 connection.commit()
 
-                return link
+                return workflow_step_responsibility
 
     def delete(
         self,
         workflow_step_id: UUID,
         responsibility_id: UUID,
     ) -> bool:
-        """Delete a workflow-step-responsibility link."""
+        """Delete a workflow-step responsibility link."""
         with get_db_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
