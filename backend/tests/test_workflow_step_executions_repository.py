@@ -5,7 +5,9 @@ from repositories.organizations import OrganizationsRepository
 from repositories.users import UsersRepository
 from repositories.worker_profiles import WorkerProfilesRepository
 from repositories.workflow_assignments import WorkflowAssignmentsRepository
-from repositories.workflow_step_executions import WorkflowStepExecutionsRepository
+from repositories.workflow_step_executions import (
+    WorkflowStepExecutionsRepository,
+)
 from repositories.workflow_steps import WorkflowStepsRepository
 from repositories.workflows import WorkflowsRepository
 
@@ -32,7 +34,6 @@ def create_test_data():
 
     worker_profile = worker_profiles.create(
         user["id"],
-        f"Test Worker {uuid4()}",
     )
 
     workflow = workflows.create(
@@ -132,10 +133,12 @@ def test_create_and_get_workflow_step_execution():
 
         assert execution is not None
         assert execution["status"] == "pending"
+
         assert (
             execution["workflow_assignment_id"]
             == data["workflow_assignment"]["id"]
         )
+
         assert (
             execution["workflow_step_id"]
             == data["workflow_step"]["id"]
@@ -195,10 +198,8 @@ def test_list_by_workflow_step_id_contains_created_execution():
             data["workflow_step"]["id"],
         )
 
-        results = (
-            data["executions"].list_by_workflow_step_id(
-                data["workflow_step"]["id"]
-            )
+        results = data["executions"].list_by_workflow_step_id(
+            data["workflow_step"]["id"]
         )
 
         assert any(
@@ -234,10 +235,12 @@ def test_update_status():
         assert updated is not None
         assert updated["id"] == execution["id"]
         assert updated["status"] == "completed"
+
         assert (
             updated["notes"]
             == "Workflow step completed successfully"
         )
+
         assert updated["started_at"] is not None
         assert updated["completed_at"] is not None
 
