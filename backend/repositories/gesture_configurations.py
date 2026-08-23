@@ -1,21 +1,11 @@
-.venv\Lib\site-packages\fastapi\testclient.py:1
-  C:\Users\srini\amap\backend\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
-    from starlette.testclient import TestClient as TestClient  # noqa
-
--- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-200 passed, 1 warning in 43.51s
-(.venv)
-srini@Srinivas-Vijay MINGW64 ~/amap/backend (main)
-$ cd ~/amap/backend
-
-sed -n '1,300p' repositories/actions.py
 """
-Action repository.
+Gesture configuration repository.
 
-Provides database access operations for the actions table.
+Provides database access operations for the gesture_configurations table.
 Business logic does not belong in this module.
 """
 
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -24,190 +14,213 @@ from psycopg.rows import dict_row
 from app.database import get_db_connection
 
 
-class ActionsRepository:
-    """Data access operations for actions."""
+class GestureConfigurationsRepository:
+    """Data access operations for gesture configurations."""
 
     def get_by_id(
         self,
-        action_id: UUID,
+        gesture_configuration_id: UUID,
     ) -> dict[str, Any] | None:
-        """Return an action by its ID, or None if it does not exist."""
+        """Return a gesture configuration by ID."""
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
                     SELECT
                         id,
-                        name,
-                        display_name,
-                        description,
-                        category,
-                        status,
+                        interaction_configuration_id,
+                        gesture_name,
+                        action_id,
+                        is_enabled,
+                        confidence_threshold,
                         created_at,
                         updated_at
-                    FROM actions
+                    FROM gesture_configurations
                     WHERE id = %s
                     """,
-                    (action_id,),
+                    (gesture_configuration_id,),
                 )
                 return cursor.fetchone()
 
     def get_by_name(
         self,
-        name: str,
+        interaction_configuration_id: UUID,
+        gesture_name: str,
     ) -> dict[str, Any] | None:
-        """Return an action by its name, or None if it does not exist."""
+        """Return a gesture configuration by configuration and gesture name."""
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
                     SELECT
                         id,
-                        name,
-                        display_name,
-                        description,
-                        category,
-                        status,
+                        interaction_configuration_id,
+                        gesture_name,
+                        action_id,
+                        is_enabled,
+                        confidence_threshold,
                         created_at,
                         updated_at
-                    FROM actions
-                    WHERE name = %s
+                    FROM gesture_configurations
+                    WHERE interaction_configuration_id = %s
+                      AND gesture_name = %s
                     """,
-                    (name,),
+                    (
+                        interaction_configuration_id,
+                        gesture_name,
+                    ),
                 )
                 return cursor.fetchone()
 
-    def list_all(self) -> list[dict[str, Any]]:
-        """Return all actions."""
+    def list_by_interaction_configuration_id(
+        self,
+        interaction_configuration_id: UUID,
+    ) -> list[dict[str, Any]]:
+        """Return gesture configurations for an interaction configuration."""
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
                     SELECT
                         id,
-                        name,
-                        display_name,
-                        description,
-                        category,
-                        status,
+                        interaction_configuration_id,
+                        gesture_name,
+                        action_id,
+                        is_enabled,
+                        confidence_threshold,
                         created_at,
                         updated_at
-                    FROM actions
-                    ORDER BY created_at
+                    FROM gesture_configurations
+                    WHERE interaction_configuration_id = %s
+                    ORDER BY gesture_name
+                    """,
+                    (interaction_configuration_id,),
+                )
+                return cursor.fetchall()
+
+    def list_by_action_id(
+        self,
+        action_id: UUID,
+    ) -> list[dict[str, Any]]:
+        """Return gesture configurations for an action."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
                     """
+                    SELECT
+                        id,
+                        interaction_configuration_id,
+                        gesture_name,
+                        action_id,
+                        is_enabled,
+                        confidence_threshold,
+                        created_at,
+                        updated_at
+                    FROM gesture_configurations
+                    WHERE action_id = %s
+                    ORDER BY gesture_name
+                    """,
+                    (action_id,),
                 )
                 return cursor.fetchall()
 
     def create(
         self,
-        name: str,
-        display_name: str,
-        description: str | None = None,
-        category: str = "general",
-        status: str = "active",
+        interaction_configuration_id: UUID,
+        gesture_name: str,
+        action_id: UUID,
+        is_enabled: bool = True,
+        confidence_threshold: Decimal | float | None = None,
     ) -> dict[str, Any]:
-        """Create and return an action."""
+        """Create and return a gesture configuration."""
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO actions (
-                        name,
-                        display_name,
-                        description,
-                        category,
-                        status
+                    INSERT INTO gesture_configurations (
+                        interaction_configuration_id,
+                        gesture_name,
+                        action_id,
+                        is_enabled,
+                        confidence_threshold
                     )
                     VALUES (%s, %s, %s, %s, %s)
                     RETURNING
                         id,
-                        name,
-                        display_name,
-                        description,
-                        category,
-                        status,
+                        interaction_configuration_id,
+                        gesture_name,
+                        action_id,
+                        is_enabled,
+                        confidence_threshold,
                         created_at,
                         updated_at
                     """,
                     (
-                        name,
-                        display_name,
-                        description,
-                        category,
-                        status,
+                        interaction_configuration_id,
+                        gesture_name,
+                        action_id,
+                        is_enabled,
+                        confidence_threshold,
                     ),
                 )
 
-                action = cursor.fetchone()
+                gesture_configuration = cursor.fetchone()
                 connection.commit()
 
-                return action
+                return gesture_configuration
 
-    def update(
+    def update_enabled(
         self,
-        action_id: UUID,
-        name: str,
-        display_name: str,
-        description: str | None,
-        category: str,
-        status: str,
+        gesture_configuration_id: UUID,
+        is_enabled: bool,
     ) -> dict[str, Any] | None:
-        """Update an action and return it, or None if it does not exist."""
+        """Update whether a gesture configuration is enabled."""
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
-                    UPDATE actions
+                    UPDATE gesture_configurations
                     SET
-                        name = %s,
-                        display_name = %s,
-                        description = %s,
-                        category = %s,
-                        status = %s,
+                        is_enabled = %s,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                     RETURNING
                         id,
-                        name,
-                        display_name,
-                        description,
-                        category,
-                        status,
+                        interaction_configuration_id,
+                        gesture_name,
+                        action_id,
+                        is_enabled,
+                        confidence_threshold,
                         created_at,
                         updated_at
                     """,
                     (
-                        name,
-                        display_name,
-                        description,
-                        category,
-                        status,
-                        action_id,
+                        is_enabled,
+                        gesture_configuration_id,
                     ),
                 )
 
-                action = cursor.fetchone()
+                gesture_configuration = cursor.fetchone()
                 connection.commit()
 
-                return action
+                return gesture_configuration
 
     def delete_by_id(
         self,
-        action_id: UUID,
+        gesture_configuration_id: UUID,
     ) -> bool:
-        """Delete an action and return whether it was deleted."""
+        """Delete a gesture configuration."""
         with get_db_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    DELETE FROM actions
+                    DELETE FROM gesture_configurations
                     WHERE id = %s
                     """,
-                    (action_id,),
+                    (gesture_configuration_id,),
                 )
 
                 deleted = cursor.rowcount == 1
                 connection.commit()
 
                 return deleted
-(.venv)
