@@ -9,6 +9,8 @@ from repositories.worker_profiles import WorkerProfilesRepository
 
 
 def create_dependencies():
+    """Create all database records required for interaction event tests."""
+
     organizations = OrganizationsRepository()
     users = UsersRepository()
     worker_profiles = WorkerProfilesRepository()
@@ -22,6 +24,7 @@ def create_dependencies():
     user = users.create(
         f"test-user-{uuid4()}@example.com",
         f"Test User {uuid4()}",
+        f"test-password-hash-{uuid4()}",
     )
 
     worker_profile = worker_profiles.create(
@@ -37,279 +40,191 @@ def create_dependencies():
         f"Test Action {uuid4()}",
     )
 
-    return (
-        organizations,
-        users,
-        worker_profiles,
-        work_sessions,
-        actions,
-        organization,
-        user,
-        worker_profile,
-        work_session,
-        action,
-    )
-
-
-def cleanup_dependencies(
-    organizations,
-    users,
-    worker_profiles,
-    work_sessions,
-    actions,
-    organization,
-    user,
-    worker_profile,
-    work_session,
-    action,
-):
-    work_sessions.delete_by_id(work_session["id"])
-    actions.delete_by_id(action["id"])
-    worker_profiles.delete_by_id(worker_profile["id"])
-    users.delete_by_id(user["id"])
-    organizations.delete_by_id(organization["id"])
+    return {
+        "organizations": organizations,
+        "users": users,
+        "worker_profiles": worker_profiles,
+        "work_sessions": work_sessions,
+        "actions": actions,
+        "organization": organization,
+        "user": user,
+        "worker_profile": worker_profile,
+        "work_session": work_session,
+        "action": action,
+    }
 
 
 def test_create_and_get_interaction_event():
-    events = InteractionEventsRepository()
-
     dependencies = create_dependencies()
+    repository = InteractionEventsRepository()
 
-    (
-        organizations,
-        users,
-        worker_profiles,
-        work_sessions,
-        actions,
-        organization,
-        user,
-        worker_profile,
-        work_session,
-        action,
-    ) = dependencies
+    event = repository.create(
+        organization_id=dependencies["organization"]["id"],
+        worker_profile_id=dependencies["worker_profile"]["id"],
+        work_session_id=dependencies["work_session"]["id"],
+        action_id=dependencies["action"]["id"],
+        interaction_mode="gesture",
+        event_type="recognized",
+        confidence=0.9500,
+        interaction_data={"source": "test"},
+    )
 
-    event = None
+    fetched_event = repository.get_by_id(event["id"])
 
-    try:
-        event = events.create(
-            organization["id"],
-            worker_profile["id"],
-            "gesture",
-            f"detected-{uuid4()}",
-            work_session_id=work_session["id"],
-            action_id=action["id"],
-            confidence=0.95,
-            interaction_data={"source": "test"},
-        )
+    assert fetched_event is not None
+    assert fetched_event["id"] == event["id"]
+    assert (
+        fetched_event["organization_id"]
+        == dependencies["organization"]["id"]
+    )
+    assert (
+        fetched_event["worker_profile_id"]
+        == dependencies["worker_profile"]["id"]
+    )
+    assert (
+        fetched_event["work_session_id"]
+        == dependencies["work_session"]["id"]
+    )
+    assert (
+        fetched_event["action_id"]
+        == dependencies["action"]["id"]
+    )
+    assert fetched_event["interaction_mode"] == "gesture"
+    assert fetched_event["event_type"] == "recognized"
+    assert fetched_event["confidence"] == 0.9500
+    assert fetched_event["interaction_data"] == {"source": "test"}
 
-        assert event is not None
-        assert event["organization_id"] == organization["id"]
-        assert event["worker_profile_id"] == worker_profile["id"]
-        assert event["interaction_mode"] == "gesture"
-        assert event["interaction_data"] == {"source": "test"}
 
-        fetched = events.get_by_id(event["id"])
+def test_get_by_id_returns_none_for_missing_event():
+    repository = InteractionEventsRepository()
 
-        assert fetched is not None
-        assert fetched["id"] == event["id"]
+    event = repository.get_by_id(uuid4())
 
-    finally:
-        if event is not None:
-            events.delete_by_id(event["id"])
-
-        cleanup_dependencies(*dependencies)
+    assert event is None
 
 
 def test_list_by_organization_id_contains_created_event():
-    events = InteractionEventsRepository()
     dependencies = create_dependencies()
+    repository = InteractionEventsRepository()
 
-    organization = dependencies[5]
-    worker_profile = dependencies[7]
+    event = repository.create(
+        organization_id=dependencies["organization"]["id"],
+        worker_profile_id=dependencies["worker_profile"]["id"],
+        interaction_mode="voice",
+        event_type="recognized",
+    )
 
-    event = None
+    events = repository.list_by_organization_id(
+        dependencies["organization"]["id"],
+    )
 
-    try:
-        event = events.create(
-            organization["id"],
-            worker_profile["id"],
-            "voice",
-            f"test-event-{uuid4()}",
-        )
+    event_ids = [item["id"] for item in events]
 
-        results = events.list_by_organization_id(
-            organization["id"],
-        )
-
-        assert any(
-            result["id"] == event["id"]
-            for result in results
-        )
-
-    finally:
-        if event is not None:
-            events.delete_by_id(event["id"])
-
-        cleanup_dependencies(*dependencies)
+    assert event["id"] in event_ids
 
 
 def test_list_by_worker_profile_id_contains_created_event():
-    events = InteractionEventsRepository()
     dependencies = create_dependencies()
+    repository = InteractionEventsRepository()
 
-    organization = dependencies[5]
-    worker_profile = dependencies[7]
+    event = repository.create(
+        organization_id=dependencies["organization"]["id"],
+        worker_profile_id=dependencies["worker_profile"]["id"],
+        interaction_mode="gesture",
+        event_type="recognized",
+    )
 
-    event = None
+    events = repository.list_by_worker_profile_id(
+        dependencies["worker_profile"]["id"],
+    )
 
-    try:
-        event = events.create(
-            organization["id"],
-            worker_profile["id"],
-            "ui",
-            f"test-event-{uuid4()}",
-        )
+    event_ids = [item["id"] for item in events]
 
-        results = events.list_by_worker_profile_id(
-            worker_profile["id"],
-        )
-
-        assert any(
-            result["id"] == event["id"]
-            for result in results
-        )
-
-    finally:
-        if event is not None:
-            events.delete_by_id(event["id"])
-
-        cleanup_dependencies(*dependencies)
+    assert event["id"] in event_ids
 
 
 def test_list_by_work_session_id_contains_created_event():
-    events = InteractionEventsRepository()
     dependencies = create_dependencies()
+    repository = InteractionEventsRepository()
 
-    organization = dependencies[5]
-    worker_profile = dependencies[7]
-    work_session = dependencies[8]
+    event = repository.create(
+        organization_id=dependencies["organization"]["id"],
+        worker_profile_id=dependencies["worker_profile"]["id"],
+        work_session_id=dependencies["work_session"]["id"],
+        interaction_mode="ui",
+        event_type="clicked",
+    )
 
-    event = None
+    events = repository.list_by_work_session_id(
+        dependencies["work_session"]["id"],
+    )
 
-    try:
-        event = events.create(
-            organization["id"],
-            worker_profile["id"],
-            "gesture",
-            f"test-event-{uuid4()}",
-            work_session_id=work_session["id"],
-        )
+    event_ids = [item["id"] for item in events]
 
-        results = events.list_by_work_session_id(
-            work_session["id"],
-        )
-
-        assert any(
-            result["id"] == event["id"]
-            for result in results
-        )
-
-    finally:
-        if event is not None:
-            events.delete_by_id(event["id"])
-
-        cleanup_dependencies(*dependencies)
+    assert event["id"] in event_ids
 
 
 def test_list_by_action_id_contains_created_event():
-    events = InteractionEventsRepository()
     dependencies = create_dependencies()
+    repository = InteractionEventsRepository()
 
-    organization = dependencies[5]
-    worker_profile = dependencies[7]
-    action = dependencies[9]
+    event = repository.create(
+        organization_id=dependencies["organization"]["id"],
+        worker_profile_id=dependencies["worker_profile"]["id"],
+        action_id=dependencies["action"]["id"],
+        interaction_mode="gesture",
+        event_type="recognized",
+    )
 
-    event = None
+    events = repository.list_by_action_id(
+        dependencies["action"]["id"],
+    )
 
-    try:
-        event = events.create(
-            organization["id"],
-            worker_profile["id"],
-            "gesture",
-            f"test-event-{uuid4()}",
-            action_id=action["id"],
-        )
+    event_ids = [item["id"] for item in events]
 
-        results = events.list_by_action_id(action["id"])
-
-        assert any(
-            result["id"] == event["id"]
-            for result in results
-        )
-
-    finally:
-        if event is not None:
-            events.delete_by_id(event["id"])
-
-        cleanup_dependencies(*dependencies)
+    assert event["id"] in event_ids
 
 
 def test_list_by_event_type_contains_created_event():
-    events = InteractionEventsRepository()
     dependencies = create_dependencies()
+    repository = InteractionEventsRepository()
 
-    organization = dependencies[5]
-    worker_profile = dependencies[7]
     event_type = f"test-event-{uuid4()}"
 
-    event = None
+    event = repository.create(
+        organization_id=dependencies["organization"]["id"],
+        worker_profile_id=dependencies["worker_profile"]["id"],
+        interaction_mode="other",
+        event_type=event_type,
+    )
 
-    try:
-        event = events.create(
-            organization["id"],
-            worker_profile["id"],
-            "other",
-            event_type,
-        )
+    events = repository.list_by_event_type(event_type)
 
-        results = events.list_by_event_type(event_type)
+    event_ids = [item["id"] for item in events]
 
-        assert any(
-            result["id"] == event["id"]
-            for result in results
-        )
-
-    finally:
-        if event is not None:
-            events.delete_by_id(event["id"])
-
-        cleanup_dependencies(*dependencies)
+    assert event["id"] in event_ids
 
 
 def test_delete_by_id_returns_true_for_existing_event():
-    events = InteractionEventsRepository()
     dependencies = create_dependencies()
+    repository = InteractionEventsRepository()
 
-    organization = dependencies[5]
-    worker_profile = dependencies[7]
+    event = repository.create(
+        organization_id=dependencies["organization"]["id"],
+        worker_profile_id=dependencies["worker_profile"]["id"],
+        interaction_mode="gesture",
+        event_type="recognized",
+    )
 
-    event = None
+    deleted = repository.delete_by_id(event["id"])
 
-    try:
-        event = events.create(
-            organization["id"],
-            worker_profile["id"],
-            "ui",
-            f"test-event-{uuid4()}",
-        )
+    assert deleted is True
+    assert repository.get_by_id(event["id"]) is None
 
-        deleted = events.delete_by_id(event["id"])
 
-        assert deleted is True
-        event = None
+def test_delete_by_id_returns_false_for_missing_event():
+    repository = InteractionEventsRepository()
 
-    finally:
-        if event is not None:
-            events.delete_by_id(event["id"])
+    deleted = repository.delete_by_id(uuid4())
 
-        cleanup_dependencies(*dependencies)
+    assert deleted is False
