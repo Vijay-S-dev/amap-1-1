@@ -3,6 +3,26 @@
 .env.*
 !.env.example
 
+# Frontend environment files
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Python environments
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/# Environment files
+.env
+.env.*
+!.env.example
+
 # Python
 __pycache__/
 *.py[cod]

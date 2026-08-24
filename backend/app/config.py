@@ -36,6 +36,20 @@ class Settings:
         # Database configuration.
         self.database_url: str = os.getenv("DATABASE_URL", "")
 
+        # Authentication / JWT configuration.
+        self.jwt_secret_key: str = os.getenv(
+            "JWT_SECRET_KEY", "amap-dev-jwt-secret-key-change-in-production-mode"
+        )
+        self.jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
+        self.access_token_expire_minutes: int = int(
+            os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
+        )
+
+        # Optional Supabase Integration settings
+        self.supabase_url: str = os.getenv("SUPABASE_URL", "")
+        self.supabase_anon_key: str = os.getenv("SUPABASE_ANON_KEY", "")
+        self.supabase_service_role_key: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
         # CORS is environment-driven per BACKEND.md §16.
         # In development, a sane localhost default is provided.
         # In production, CORS_ALLOWED_ORIGINS must be explicitly set.
@@ -59,12 +73,17 @@ class Settings:
     def _validate(self) -> None:
         """Validate required application settings."""
 
-        if self.environment == "production" and not self.cors_allowed_origins:
-            raise RuntimeError(
-                "CORS_ALLOWED_ORIGINS must be explicitly set when "
-                "ENVIRONMENT=production. Refusing to start with an "
-                "unrestricted or empty CORS configuration in production."
-            )
+        if self.environment == "production":
+            if not self.cors_allowed_origins:
+                raise RuntimeError(
+                    "CORS_ALLOWED_ORIGINS must be explicitly set when "
+                    "ENVIRONMENT=production. Refusing to start with an "
+                    "unrestricted or empty CORS configuration in production."
+                )
+            if self.jwt_secret_key == "amap-dev-jwt-secret-key-change-in-production-mode":
+                raise RuntimeError(
+                    "JWT_SECRET_KEY must be explicitly set with a secure key in production."
+                )
 
         if not self.database_url:
             raise RuntimeError("DATABASE_URL must be explicitly set.")

@@ -1,8 +1,7 @@
 """
-Baseline security headers middleware.
-
-Foundational only, per BACKEND.md §15 — general-purpose header hardening,
-not business- or auth-specific.
+Hardened security headers middleware.
+Provides standard defense-in-depth HTTP response headers against clickjacking,
+MIME-sniffing, and XSS.
 """
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -16,5 +15,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Content-Security-Policy"] = "default-src 'self'"
         return response
-

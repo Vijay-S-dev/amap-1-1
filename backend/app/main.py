@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.error_handlers import register_error_handlers
 from middleware.logging_middleware import RequestLoggingMiddleware
+from middleware.rate_limiting import RateLimitingMiddleware
 from middleware.request_id import RequestIDMiddleware
 from middleware.security_headers import SecurityHeadersMiddleware
 from routes import api_v1_router
@@ -36,6 +37,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestIDMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RateLimitingMiddleware)
 
     # CORS is environment-driven per BACKEND.md #16 — never hardcoded
     # to unrestricted origins in production (enforced in app/config.py).
