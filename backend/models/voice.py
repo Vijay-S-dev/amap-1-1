@@ -28,7 +28,7 @@ class VoiceCommandPayload(StrictInputModel):
         description="Speech recognizer confidence score [0.0, 1.0]",
     )
     language: str = Field(default="en-US", max_length=20)
-    work_session_id: Optional[UUID] = None
+    work_session_id: Optional[str] = None
     client_context: Dict[str, Any] = Field(default_factory=dict)
 
 

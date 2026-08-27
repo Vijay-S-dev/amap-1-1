@@ -1,17 +1,10 @@
-import { SideScaffold } from "@/shared/components/SideScaffold";
+'use client';
 
-export default function OrganizationPage() {
-  return (
-    <SideScaffold
-      side="organization"
-      title="Organization governance"
-      description="This will cover organizational structure, workforce lifecycle, accessibility and accommodation governance, and org-level analytics. Depends on the multi-tenancy and permission model, which are not yet frozen."
-      upcoming={[
-        "Organization and department structure setup",
-        "Accessibility and accommodation governance",
-        "Access and permission governance",
-        "Organization-level analytics and compliance/audit views",
-      ]}
-    />
-  );
-}
+/**
+ * Organization & Supervisor Operations Portal (/organisation)
+ * Aliased route supporting standard organization governance, fleet monitoring, and supervisor queue.
+ */
+
+import OrganizationPage from '../organization/page';
+
+export default OrganizationPage;

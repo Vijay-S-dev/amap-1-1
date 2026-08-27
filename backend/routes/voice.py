@@ -7,7 +7,9 @@ Provides real-time speech command parsing, fuzzy keyword matching, and safety co
 
 from fastapi import APIRouter, Depends, status
 
-from app.dependencies import get_current_user
+from typing import Optional
+
+from app.dependencies import get_current_user_optional
 from models.auth import AuthenticatedUserContext
 from models.voice import VoiceCommandPayload, VoiceCommandResult
 from services.voice_service import VoiceService
@@ -30,14 +32,15 @@ def get_voice_service() -> VoiceService:
 )
 def process_command(
     payload: VoiceCommandPayload,
-    current_user: AuthenticatedUserContext = Depends(get_current_user),
+    current_user: Optional[AuthenticatedUserContext] = Depends(get_current_user_optional),
     service: VoiceService = Depends(get_voice_service),
 ) -> VoiceCommandResult:
     """
     Parse speech transcript into an AMAP candidate action with confidence tiering
     and safety confirmation gating.
     """
+    worker_id = current_user.worker_profile_id if current_user else None
     return service.process_command(
         payload=payload,
-        worker_profile_id=current_user.worker_profile_id,
+        worker_profile_id=worker_id,
     )

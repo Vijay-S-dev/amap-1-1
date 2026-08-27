@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: amap-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: amap
+      POSTGRES_USER: amap_user
+      POSTGRES_PASSWORD: change_me
+    ports:
+      - "5432:5432"
+    volumes:
+      - amap_dev_postgres_data:/var/lib/postgresql/data
+      - ../../database/schema/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ../../database/seed/seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+
+  redis:
+    image: redis:7-alpine
+    container_name: amap-dev-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+volumes:
+  amap_dev_postgres_data:

@@ -22,6 +22,7 @@ from services.authorization_service import AuthorizationService
 from services.base import UnauthorizedError
 
 bearer_scheme = HTTPBearer(auto_error=True)
+optional_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_auth_service() -> AuthService:
@@ -47,6 +48,22 @@ def get_current_user(
             detail=str(exc),
             headers={"WWW-Authenticate": "Bearer"},
         ) from exc
+
+
+def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(optional_bearer_scheme),
+    auth_service: AuthService = Depends(get_auth_service),
+) -> Optional[AuthenticatedUserContext]:
+    """
+    Optional user dependency: returns AuthenticatedUserContext if valid Bearer JWT is provided,
+    or None if caller is in unauthenticated onboarding/demo state.
+    """
+    if not credentials or not credentials.credentials:
+        return None
+    try:
+        return auth_service.verify_token(credentials.credentials)
+    except Exception:
+        return None
 
 
 def get_current_active_worker(

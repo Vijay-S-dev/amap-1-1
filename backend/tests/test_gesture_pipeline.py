@@ -93,7 +93,7 @@ def test_classify_open_palm():
         ring_ext=True,
         pinky_ext=True,
     )
-    gesture, conf = service.classify_landmarks(open_hand)
+    gesture, conf, *_ = service.classify_landmarks(open_hand)
     assert gesture == "open_palm"
     assert conf >= 0.90
 
@@ -107,7 +107,7 @@ def test_classify_fist():
         ring_ext=False,
         pinky_ext=False,
     )
-    gesture, conf = service.classify_landmarks(fist_hand)
+    gesture, conf, *_ = service.classify_landmarks(fist_hand)
     assert gesture == "fist"
     assert conf >= 0.85
 
@@ -122,7 +122,7 @@ def test_classify_thumbs_up():
         ring_ext=False,
         pinky_ext=False,
     )
-    gesture, conf = service.classify_landmarks(thumbs_up_hand)
+    gesture, conf, *_ = service.classify_landmarks(thumbs_up_hand)
     assert gesture == "thumbs_up"
     assert conf >= 0.90
 
@@ -137,7 +137,7 @@ def test_classify_thumbs_down():
         ring_ext=False,
         pinky_ext=False,
     )
-    gesture, conf = service.classify_landmarks(thumbs_down_hand)
+    gesture, conf, *_ = service.classify_landmarks(thumbs_down_hand)
     assert gesture == "thumbs_down"
     assert conf >= 0.90
 
@@ -151,7 +151,7 @@ def test_classify_pointing():
         ring_ext=False,
         pinky_ext=False,
     )
-    gesture, conf = service.classify_landmarks(point_hand)
+    gesture, conf, *_ = service.classify_landmarks(point_hand)
     assert gesture == "pointing"
     assert conf >= 0.90
 
@@ -159,7 +159,7 @@ def test_classify_pointing():
 def test_classify_pinch():
     service = GestureService()
     pinch_hand = _create_sample_hand(pinch=True)
-    gesture, conf = service.classify_landmarks(pinch_hand)
+    gesture, conf, *_ = service.classify_landmarks(pinch_hand)
     assert gesture == "pinch"
     assert conf >= 0.85
 

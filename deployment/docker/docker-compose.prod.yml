@@ -1,0 +1,90 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: amap-prod-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-amap}
+      POSTGRES_USER: ${POSTGRES_USER:-amap_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - amap_prod_postgres_data:/var/lib/postgresql/data
+      - ../../database/schema/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ../../database/seed/seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-amap_user} -d ${POSTGRES_DB:-amap}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - amap-internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: amap-prod-redis
+    restart: always
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:-amap_redis_secure_pass}"
+    volumes:
+      - amap_prod_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - amap-internal
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.backend
+    container_name: amap-prod-backend
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-amap_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-amap}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-amap_redis_secure_pass}@redis:6379/0
+      ENVIRONMENT: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - amap-internal
+
+  frontend:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.frontend
+    container_name: amap-prod-frontend
+    restart: always
+    environment:
+      NEXT_PUBLIC_API_URL: http://nginx/api/v1
+    depends_on:
+      - backend
+    networks:
+      - amap-internal
+
+  nginx:
+    image: nginx:alpine
+    container_name: amap-prod-nginx
+    restart: always
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - amap-internal
+
+volumes:
+  amap_prod_postgres_data:
+  amap_prod_redis_data:
+
+networks:
+  amap-internal:
+    driver: bridge

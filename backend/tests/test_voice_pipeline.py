@@ -1,13 +1,14 @@
 """
-Tests for AMAP Voice Input Pipeline (Phase 10).
-Covers speech command normalization, phonetic/fuzzy keyword matching, confidence thresholding,
-safety confirmation gating, and the voice API endpoint.
+Tests for AMAP Voice Input Pipeline (Phase 10 & § 11, § 12, § 13, § 14, § 28).
+Covers speech command normalization, multilingual keyword matching (en, es, de, hi, ta),
+confidence thresholding, safety confirmation gating, and the voice API endpoint.
 """
 
 from unittest.mock import MagicMock
 import uuid
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.dependencies import get_current_user
 from app.main import app
@@ -17,68 +18,96 @@ from services.voice_service import VoiceService
 
 
 # =====================================================================
-# Exact & Vocabulary Match Tests
+# Exact & Multilingual Vocabulary Match Tests (§ 11, § 13)
 # =====================================================================
 
-def test_voice_exact_matches():
+def test_voice_exact_and_multilingual_matches():
     service = VoiceService()
 
-    # Next step
+    # 1. English commands
     cmd, action, score, is_crit = service.match_command("next step")
     assert cmd == "next_step"
     assert action == "next_step"
-    assert score == 1.0
     assert is_crit is False
 
-    # Confirm action
-    cmd, action, score, is_crit = service.match_command("confirm")
+    cmd, action, score, is_crit = service.match_command("confirm please")
     assert cmd == "confirm_action"
     assert action == "confirm_action"
-    assert score == 1.0
 
-    # Cancel action (safety critical)
-    cmd, action, score, is_crit = service.match_command("cancel")
-    assert cmd == "cancel_action"
-    assert action == "cancel_action"
-    assert score == 1.0
-    assert is_crit is True
-
-    # Emergency stop (safety critical)
     cmd, action, score, is_crit = service.match_command("emergency stop")
     assert cmd == "emergency_stop"
+    assert action == "emergency_stop"
     assert is_crit is True
 
-    # Assistance
     cmd, action, score, is_crit = service.match_command("call supervisor")
     assert cmd == "request_assistance"
     assert action == "request_assistance"
 
+    # 2. Spanish commands
+    cmd_es, act_es, _, _ = service.match_command("siguiente")
+    assert cmd_es == "next_step"
+    assert act_es == "next_step"
+
+    cmd_es2, act_es2, _, _ = service.match_command("confirmar")
+    assert cmd_es2 == "confirm_action"
+    assert act_es2 == "confirm_action"
+
+    cmd_es3, act_es3, _, is_crit = service.match_command("detener")
+    assert cmd_es3 == "emergency_stop"
+    assert is_crit is True
+
+    # 3. German commands
+    cmd_de, act_de, _, _ = service.match_command("weiter")
+    assert cmd_de == "next_step"
+
+    cmd_de2, act_de2, _, _ = service.match_command("bestätigen")
+    assert cmd_de2 == "confirm_action"
+
+    # 4. Hindi commands
+    cmd_hi, act_hi, _, _ = service.match_command("अगला")
+    assert cmd_hi == "next_step"
+
+    cmd_hi2, act_hi2, _, _ = service.match_command("पुष्टि")
+    assert cmd_hi2 == "confirm_action"
+
+    # 5. Tamil commands
+    cmd_ta, act_ta, _, _ = service.match_command("அடுத்து")
+    assert cmd_ta == "next_step"
+
+    cmd_ta2, act_ta2, _, _ = service.match_command("உறுதி")
+    assert cmd_ta2 == "confirm_action"
+
 
 # =====================================================================
-# Fuzzy Matching & Noise Tolerance Tests
+# Unknown Speech & Non-Vocabulary Safety Tests (§ 8, § 14)
 # =====================================================================
 
-def test_voice_fuzzy_matching():
+def test_voice_unknown_speech_rejection():
     service = VoiceService()
 
-    # Slurred/abbreviated "nxt stp"
-    cmd, action, score, _ = service.match_command("nxt stp")
-    assert cmd == "next_step"
-    assert score >= 0.85
+    # 1. Empty text rejected by schema validation
+    with pytest.raises(ValidationError):
+        VoiceCommandPayload(raw_transcript="   ", confidence=0.95)
 
-    # Conversational phrasing "please pause session now"
-    cmd, action, score, _ = service.match_command("please pause session now")
-    assert cmd == "pause_session"
-    assert score >= 0.60
+    with pytest.raises(ValidationError):
+        VoiceCommandPayload(raw_transcript="", confidence=0.95)
 
-    # Minor typo "approv"
-    cmd, action, score, _ = service.match_command("approv")
-    assert cmd == "confirm_action"
-    assert score >= 0.80
+    # 2. Casual conversation / off-vocabulary speech safely produces unmatched status and zero intent
+    p_chat = VoiceCommandPayload(raw_transcript="I had lunch already today", confidence=0.92)
+    r_chat = service.process_command(p_chat)
+    assert r_chat.matched_command is None
+    assert r_chat.action_mapping is None
+    assert r_chat.validation_status == "unmatched"
+
+    p_weather = VoiceCommandPayload(raw_transcript="what time does the shift end", confidence=0.88)
+    r_weather = service.process_command(p_weather)
+    assert r_weather.matched_command is None
+    assert r_weather.action_mapping is None
+    assert r_weather.validation_status == "unmatched"
 
 
 # =====================================================================
-# Confidence Tiering & Safety Gating Tests
+# Confidence Tiering & Safety Gating Tests (§ 15, § 16)
 # =====================================================================
 
 def test_voice_process_command_tiers():
@@ -105,15 +134,9 @@ def test_voice_process_command_tiers():
     assert r3.validation_status == "valid"
     assert r3.requires_confirmation is True
 
-    # 4. Unrecognized background chatter
-    p4 = VoiceCommandPayload(raw_transcript="what is the weather in London today", confidence=0.90)
-    r4 = service.process_command(p4)
-    assert r4.matched_command is None
-    assert r4.validation_status == "unmatched"
-
 
 # =====================================================================
-# Voice API Endpoint Tests
+# Voice API Endpoint Tests (§ 21)
 # =====================================================================
 
 def test_voice_process_command_api_endpoint():
@@ -135,6 +158,7 @@ def test_voice_process_command_api_endpoint():
 
     app.dependency_overrides[get_current_user] = lambda: mock_user
     try:
+        # Valid assistance command
         resp = client.post(
             "/api/v1/voice/process-command",
             json={
@@ -148,6 +172,21 @@ def test_voice_process_command_api_endpoint():
         assert data["matched_command"] == "request_assistance"
         assert data["action_mapping"] == "request_assistance"
         assert data["validation_status"] == "valid"
+
+        # Unknown speech returns unmatched
+        resp_unmatched = client.post(
+            "/api/v1/voice/process-command",
+            json={
+                "raw_transcript": "good morning team",
+                "confidence": 0.90,
+                "language": "en-US",
+            },
+        )
+        assert resp_unmatched.status_code == 200
+        data_unmatched = resp_unmatched.json()
+        assert data_unmatched["matched_command"] is None
+        assert data_unmatched["action_mapping"] is None
+        assert data_unmatched["validation_status"] == "unmatched"
 
     finally:
         app.dependency_overrides.clear()

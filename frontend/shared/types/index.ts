@@ -123,3 +123,20 @@ export interface AuditLogEntry {
   eventData: Record<string, any>;
   occurredAt: string;
 }
+
+export interface CustomGestureProfile {
+  id: string;
+  worker_id: string;
+  organization_id: string;
+  gesture_name: string;
+  intent: string;
+  action_mapping: string;
+  handedness: string;
+  sample_count: number;
+  stability_score: number;
+  feature_template: number[];
+  version: number;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}

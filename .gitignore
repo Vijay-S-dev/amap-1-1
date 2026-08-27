@@ -11,24 +11,20 @@ frontend/.env.*
 # Python environments
 .venv/
 venv/
+backend/.venv/
+backend/venv/
 
-# Node
+# Node & Next.js
 node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
 
 # Python cache
 __pycache__/
 *.py[cod]
-.pytest_cache/# Environment files
-.env
-.env.*
-!.env.example
-
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-
-# Test and type-check caches
 .pytest_cache/
+backend/.pytest_cache/
 .mypy_cache/
