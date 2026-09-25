@@ -131,27 +131,30 @@ class AuthService:
         clean_email = email.lower().strip()
         user_data = None
 
+        settings = get_settings()
+
         # 1. Attempt database lookup
         try:
             user_data = self.users_repo.get_by_email(organization_id, clean_email)
         except Exception:
             user_data = None
 
-        # 2. Resilient fallback for seeded demo accounts
+        # 2. Resilient fallback for seeded demo accounts (DEVELOPMENT ONLY if explicitly enabled)
         is_demo_fallback = False
-        if not user_data and clean_email in _DEV_DEMO_USERS:
-            demo = _DEV_DEMO_USERS[clean_email]
-            user_data = {
-                "id": demo["id"],
-                "organization_id": demo["organization_id"],
-                "email": demo["email"],
-                "full_name": demo["full_name"],
-                "password_hash": demo["password_hash"],
-                "status": demo["status"],
-                "created_at": datetime.now(timezone.utc),
-                "updated_at": datetime.now(timezone.utc),
-            }
-            is_demo_fallback = True
+        if not user_data and not settings.is_production and settings.enable_dev_demo_users:
+            if clean_email in _DEV_DEMO_USERS:
+                demo = _DEV_DEMO_USERS[clean_email]
+                user_data = {
+                    "id": demo["id"],
+                    "organization_id": demo["organization_id"],
+                    "email": demo["email"],
+                    "full_name": demo["full_name"],
+                    "password_hash": demo["password_hash"],
+                    "status": demo["status"],
+                    "created_at": datetime.now(timezone.utc),
+                    "updated_at": datetime.now(timezone.utc),
+                }
+                is_demo_fallback = True
 
         if not user_data:
             raise UnauthorizedError("Invalid email or password.")
@@ -159,13 +162,9 @@ class AuthService:
         if user_data.get("status") != "active":
             raise UnauthorizedError("User account is inactive or archived.")
 
-        # 3. Verify password hash (accepts plain demo password or hash verification)
-        if password == "SecurePassword123!":
-            password_valid = True
-        else:
-            password_valid = verify_password(password, user_data.get("password_hash", ""))
-
-        if not password_valid:
+        # 3. Verify password hash using PBKDF2 (no plaintext bypass)
+        stored_hash = user_data.get("password_hash", "")
+        if not verify_password(password, stored_hash):
             raise UnauthorizedError("Invalid email or password.")
 
         user_id = user_data["id"]
@@ -227,15 +226,16 @@ class AuthService:
         except Exception:
             user_data = None
 
-        if not user_data and email in _DEV_DEMO_USERS:
-            demo = _DEV_DEMO_USERS[email]
-            user_data = {
-                "id": demo["id"],
-                "organization_id": demo["organization_id"],
-                "email": demo["email"],
-                "full_name": demo["full_name"],
-                "status": demo["status"],
-            }
+        if not user_data and not settings.is_production and settings.enable_dev_demo_users:
+            if email in _DEV_DEMO_USERS:
+                demo = _DEV_DEMO_USERS[email]
+                user_data = {
+                    "id": demo["id"],
+                    "organization_id": demo["organization_id"],
+                    "email": demo["email"],
+                    "full_name": demo["full_name"],
+                    "status": demo["status"],
+                }
 
         if not user_data or user_data.get("status") != "active":
             raise UnauthorizedError("User no longer exists or is inactive.")

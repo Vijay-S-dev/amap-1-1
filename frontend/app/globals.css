@@ -44,7 +44,9 @@
 }
 
 /* High Contrast Mode Override */
-body.high-contrast {
+.theme-high-contrast,
+body.high-contrast,
+body.theme-high-contrast {
   --bg-primary: #000000;
   --bg-secondary: #0a0a0a;
   --surface-glass: #111111;
@@ -56,6 +58,43 @@ body.high-contrast {
   --worker-cyan: #00ffff;
   --org-emerald: #00ff66;
   --admin-purple: #bb86fc;
+}
+
+/* Screen Reader Only Utility (WCAG 2.1 Visually Hidden Pattern) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Accessible Skip Link */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 1.5rem;
+  background: var(--worker-cyan);
+  color: #0b0f19;
+  padding: 0.75rem 1.5rem;
+  font-weight: 800;
+  font-size: 0.95rem;
+  border-radius: var(--radius-sm);
+  z-index: 9999;
+  text-decoration: none;
+  transition: top var(--transition-fast);
+  box-shadow: 0 4px 20px rgba(0, 242, 254, 0.4);
+}
+
+.skip-link:focus,
+.skip-link:focus-visible {
+  top: 1rem;
+  outline: 3px solid #ffffff;
+  outline-offset: 3px;
 }
 
 * {
@@ -204,6 +243,33 @@ html, body {
 
 .animate-pulse-glow {
   animation: pulse-glow 2.5s infinite ease-in-out;
+}
+
+/* Reduced Motion (WCAG 2.3.3: OS Preference & Application Mode) */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-pulse-glow {
+    animation: none !important;
+  }
+}
+
+.reduce-motion,
+.reduce-motion *,
+.reduce-motion ::before,
+.reduce-motion ::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+.reduce-motion .animate-pulse-glow {
+  animation: none !important;
 }
 
 /* Invariant Banner */

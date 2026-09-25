@@ -5,7 +5,7 @@
  * (§ 1, § 2, § 3, § 4, § 5, § 6, § 7, § 8, § 9, § 10, § 11, § 12, § 13, § 14, § 15, § 16, § 17, § 18, § 29)
  * 
  * Critical Architecture Invariants:
- * 1. Decoupled Recognition Listeners: MediaPipe and SpeechRecognition do NOT restart on sibling modality state changes.
+ * 1. Decoupled Recognition Listeners: MediaPipe and the local recorder do NOT restart on sibling modality state changes.
  * 2. Temporal Fusion Window (2500ms): Bi-directional fusion matching (Voice then Gesture OR Gesture then Voice).
  * 3. Real Cross-Modal Conflict Safety Interlock: Proves system suspends execution when Voice ('Confirm') conflicts with Gesture ('Open Palm').
  * 4. Zero Fake Clicks / No Mock Success: All stage progressions require real perception results.
@@ -18,6 +18,7 @@ import { useRouter } from 'next/navigation';
 import { useAccessibility } from '@/shared/theme/AccessibilityContext';
 import { t } from '@/shared/i18n/languages';
 import { api } from '@/shared/api/client';
+import { useVoiceRecorder, TranscriptionResult, VoiceRecorderState } from '@/shared/hooks/useVoiceRecorder';
 import MediaPipeHandTracker from '@/worker/components/MediaPipeHandTracker';
 
 interface TrainingStage {
@@ -44,6 +45,7 @@ export default function TrainingPage() {
   const gestureRequired = modality === 'gesture' || modality === 'multimodal' || modality === 'ui';
   const voiceRequired = modality === 'voice' || modality === 'multimodal' || modality === 'ui';
   const multimodalRequired = modality === 'multimodal';
+  const sttLanguage = language === 'hi' ? 'hi' : 'en';
 
   // Dynamic Stages based on Interaction Mode (§ 3, § 4, § 5, § 13)
   const stages: TrainingStage[] = React.useMemo(() => {
@@ -196,7 +198,6 @@ export default function TrainingPage() {
   const [activeGesture, setActiveGesture] = useState<string>('NONE');
   const [activeVoiceCommand, setActiveVoiceCommand] = useState<string>('NONE');
   const [hasHand, setHasHand] = useState<boolean>(false);
-  const [isListening, setIsListening] = useState<boolean>(false);
 
   // Multimodal Fusion Live Tracking Chips
   const [fusedVoiceState, setFusedVoiceState] = useState<string>('NONE');
@@ -206,7 +207,6 @@ export default function TrainingPage() {
   const currentStageIndexRef = useRef<number>(0);
   const isCompletedRef = useRef<boolean>(false);
   const stagesRef = useRef<TrainingStage[]>(stages);
-  const lastVoiceTimeRef = useRef<number>(0);
   const activeGestureRef = useRef<string>('NONE');
   const activeVoiceRef = useRef<string>('NONE');
   const recentVoiceActionRef = useRef<{ action: string; time: number } | null>(null);
@@ -325,120 +325,83 @@ export default function TrainingPage() {
     [advanceStage, playAudioCue]
   );
 
-  // Initialize Speech Recognition for Voice Training (Mounted ONCE)
-  useEffect(() => {
-    if (!voiceRequired) return;
-
-    let recognition: any = null;
-    let isMounted = true;
-
+  const handleVoiceTranscript = useCallback(async (result: TranscriptionResult) => {
+    const rawTranscript = result.transcript.trim();
     try {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (SpeechRecognition) {
-        recognition = new SpeechRecognition();
-        recognition.continuous = true;
-        recognition.interimResults = false;
-        recognition.lang =
-          language === 'es'
-            ? 'es-ES'
-            : language === 'ta'
-            ? 'ta-IN'
-            : language === 'hi'
-            ? 'hi-IN'
-            : language === 'de'
-            ? 'de-DE'
-            : 'en-US';
-
-        recognition.onstart = () => {
-          if (isMounted) setIsListening(true);
-        };
-
-        recognition.onresult = async (event: any) => {
-          const now = Date.now();
-          if (now - lastVoiceTimeRef.current < 500) return;
-          lastVoiceTimeRef.current = now;
-
-          const rawTranscript = event.results[event.results.length - 1][0].transcript.trim();
-          if (!rawTranscript) return;
-
-          try {
-            const res = await api.processVoiceCommand({
-              raw_transcript: rawTranscript,
-              language: recognition.lang,
-            });
-
-            if (res.validation_status === 'valid' && res.action_mapping) {
-              const action = res.action_mapping;
-              setActiveVoiceCommand(action);
-              activeVoiceRef.current = action;
-              recentVoiceActionRef.current = { action, time: Date.now() };
-
-              const stage = stagesRef.current[currentStageIndexRef.current];
-              if (!stage || isCompletedRef.current) return;
-
-              if (stage.expectedModality === 'voice') {
-                if (action === stage.requiredAction) {
-                  advanceStage(`✓ Voice command verified: "${rawTranscript}" (${action})!`);
-                } else {
-                  playAudioCue('alert');
-                  setFeedbackType('warning');
-                  setFeedbackMessage(`⚠️ Heard "${rawTranscript}" (${action}), expected ${stage.requiredAction}. Please try again.`);
-                }
-              } else if (stage.expectedModality === 'multimodal_fuse') {
-                setFusedVoiceState(action);
-                // Check if gesture THUMBS_UP arrived in last 2500ms
-                const recentGest = recentGestureActionRef.current;
-                if (recentGest && recentGest.gesture === 'THUMBS_UP' && Date.now() - recentGest.time < 2500) {
-                  advanceStage('✓ Multimodal Reinforcing Confirmation Passed (Thumbs Up + Voice "Confirm")!');
-                } else {
-                  setFeedbackType('info');
-                  setFeedbackMessage(`🎙️ Voice "${rawTranscript}" heard. Now show Thumbs Up 👍 to confirm.`);
-                }
-              } else if (stage.expectedModality === 'multimodal_conflict') {
-                setFusedVoiceState(action);
-                // Check if gesture OPEN_PALM arrived in last 3000ms
-                const recentGest = recentGestureActionRef.current;
-                if (recentGest && recentGest.gesture === 'OPEN_PALM' && Date.now() - recentGest.time < 3000) {
-                  playAudioCue('alert');
-                  advanceStage('🛡️ Safety Interlock Verified: Conflicting commands (Voice "Confirm" + Gesture "Open Palm") safely suspended execution!');
-                } else {
-                  setFeedbackType('info');
-                  setFeedbackMessage(`🎙️ Voice "${rawTranscript}" heard. Now show Open Palm ✋ to test conflict interlock.`);
-                }
-              }
-            } else {
-              playAudioCue('alert');
-              setFeedbackType('warning');
-              setFeedbackMessage(`⚠️ Unrecognized speech: "${rawTranscript}". Please repeat the command.`);
-            }
-          } catch (err) {
-            console.error('Training voice processing error:', err);
-          }
-        };
-
-        recognition.onend = () => {
-          if (isMounted) {
-            try {
-              recognition.start();
-            } catch {}
-          }
-        };
-
-        recognition.start();
+      const commandResult = await api.processVoiceCommand({
+        raw_transcript: rawTranscript,
+        confidence: result.confidence,
+        language: result.detected_language,
+      });
+      if (commandResult.validation_status !== 'valid' || !commandResult.action_mapping) {
+        playAudioCue('alert');
+        setFeedbackType('warning');
+        setFeedbackMessage(`⚠️ Unrecognized speech: "${rawTranscript}". Please repeat the command.`);
+        return;
       }
-    } catch {
-      // Voice engine fallback
+
+      const action = commandResult.action_mapping;
+      setActiveVoiceCommand(action);
+      activeVoiceRef.current = action;
+      recentVoiceActionRef.current = { action, time: Date.now() };
+      const stage = stagesRef.current[currentStageIndexRef.current];
+      if (!stage || isCompletedRef.current) return;
+
+      if (stage.expectedModality === 'voice') {
+        if (action === stage.requiredAction) {
+          advanceStage(`✓ Voice command verified: "${rawTranscript}" (${action})!`);
+        } else {
+          playAudioCue('alert');
+          setFeedbackType('warning');
+          setFeedbackMessage(`⚠️ Heard "${rawTranscript}" (${action}), expected ${stage.requiredAction}. Please try again.`);
+        }
+      } else if (stage.expectedModality === 'multimodal_fuse') {
+        setFusedVoiceState(action);
+        const recentGest = recentGestureActionRef.current;
+        if (recentGest && recentGest.gesture === 'THUMBS_UP' && Date.now() - recentGest.time < 2500) {
+          advanceStage('✓ Multimodal Reinforcing Confirmation Passed (Thumbs Up + Voice "Confirm")!');
+        } else {
+          setFeedbackType('info');
+          setFeedbackMessage(`🎙️ Voice "${rawTranscript}" heard. Now show Thumbs Up 👍 to confirm.`);
+        }
+      } else if (stage.expectedModality === 'multimodal_conflict') {
+        setFusedVoiceState(action);
+        const recentGest = recentGestureActionRef.current;
+        if (recentGest && recentGest.gesture === 'OPEN_PALM' && Date.now() - recentGest.time < 3000) {
+          playAudioCue('alert');
+          advanceStage('🛡️ Safety Interlock Verified: Conflicting commands (Voice "Confirm" + Gesture "Open Palm") safely suspended execution!');
+        } else {
+          setFeedbackType('info');
+          setFeedbackMessage(`🎙️ Voice "${rawTranscript}" heard. Now show Open Palm ✋ to test conflict interlock.`);
+        }
+      }
+    } catch (err) {
+      console.error('Training voice processing error:', err);
+      setFeedbackType('error');
+      setFeedbackMessage('⚠️ Voice command evaluation failed. Please try again.');
     }
+  }, [advanceStage, playAudioCue]);
 
-    return () => {
-      isMounted = false;
-      if (recognition) {
-        try {
-          recognition.stop();
-        } catch {}
-      }
-    };
-  }, [advanceStage, language, playAudioCue, voiceRequired]);
+  const handleVoiceError = useCallback((message: string) => {
+    setFeedbackType('error');
+    setFeedbackMessage(`⚠️ ${message}`);
+  }, []);
+
+  const handleRecorderState = useCallback((state: VoiceRecorderState) => {
+    if (state === 'ERROR') {
+      setFeedbackType('error');
+      setFeedbackMessage('⚠️ Microphone or transcription error. Please try again.');
+    }
+  }, []);
+
+  const recorder = useVoiceRecorder({
+    enabled: voiceRequired,
+    language: sttLanguage,
+    onTranscript: handleVoiceTranscript,
+    onError: handleVoiceError,
+    onStateChange: handleRecorderState,
+  });
+  const isListening = recorder.state === 'RECORDING';
 
   const handleEnterWorkspace = () => {
     setHasCompletedTraining(true);
@@ -633,6 +596,23 @@ export default function TrainingPage() {
                 </strong>
                 <span style={{ color: 'var(--text-primary)', fontSize: '0.95rem' }}>{currentStage.hint}</span>
               </div>
+
+              {voiceRequired && currentStage.expectedModality !== 'gesture' && (
+                <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => recorder.startRecording()}
+                    disabled={recorder.state === 'RECORDING' || recorder.state === 'PROCESSING'}
+                    className="btn btn-primary"
+                    style={{ minHeight: '52px', minWidth: '180px', fontSize: '1rem', fontWeight: 800 }}
+                  >
+                    {recorder.state === 'RECORDING' ? '🔴 Listening…' : recorder.state === 'PROCESSING' ? '⏳ Transcribing…' : '🎙️ Speak'}
+                  </button>
+                  <div style={{ marginTop: '0.5rem', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
+                    Auto-stops after silence · mic level {recorder.volumeLevel}%
+                  </div>
+                </div>
+              )}
 
               {/* Real MediaPipe Hand Tracker Viewport (When Gesture Required) (§ 9) */}
               {gestureRequired && (

@@ -54,7 +54,198 @@ export type GesturePipelineStatus =
   | 'GESTURE_CANDIDATE'
   | 'GESTURE_CONFIRMED'
   | 'WAIT_FOR_RELEASE'
+  | 'CONFLICT'
   | 'ERROR';
+
+export interface MultiHandResolution {
+  dominantGesture: string | null;
+  confidence: number;
+  isConflicting: boolean;
+  statusMessage?: string;
+}
+
+/**
+ * Geometric Classification for an Individual Hand (Phase 4 Hardened)
+ * Evaluates 21 3D landmarks for canonical AMAP gestures:
+ * - THUMBS_UP (confirm_action)
+ * - THUMBS_DOWN (cancel_action)
+ * - FIST (emergency_stop)
+ * - POINTING (orientation-robust next_step / point_focus)
+ * - OPEN_PALM (pause_session)
+ * - UNKNOWN (safely rejected)
+ */
+export function classifySingleHand(landmarks: Landmark3D[]): { gesture: string | null; confidence: number } {
+  if (!landmarks || landmarks.length < 21) {
+    return { gesture: null, confidence: 0 };
+  }
+
+  const wrist = landmarks[0];
+  const thumbIp = landmarks[3];
+  const thumbTip = landmarks[4];
+  const indexMcp = landmarks[5];
+  const indexPip = landmarks[6];
+  const indexTip = landmarks[8];
+  const middleMcp = landmarks[9];
+  const middlePip = landmarks[10];
+  const middleTip = landmarks[12];
+  const ringMcp = landmarks[13];
+  const ringPip = landmarks[14];
+  const ringTip = landmarks[16];
+  const pinkyMcp = landmarks[17];
+  const pinkyPip = landmarks[18];
+  const pinkyTip = landmarks[20];
+
+  const dist2d = (p1: Landmark3D, p2: Landmark3D) =>
+    Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+
+  const dist3d = (p1: Landmark3D, p2: Landmark3D) => {
+    const dz = (p1.z || 0) - (p2.z || 0);
+    return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2 + dz * dz);
+  };
+
+  const palmSize = dist2d(wrist, middleMcp);
+  if (palmSize < 0.04) {
+    return { gesture: null, confidence: 0 };
+  }
+
+  // Robust Extension Metrics: supports both vertical extension and 3D radial extension
+  const isExtended = (tip: Landmark3D, pip: Landmark3D, mcp: Landmark3D): boolean => {
+    const verticalExt = tip.y < pip.y && tip.y < mcp.y;
+    const radialExt = dist3d(tip, wrist) > dist3d(pip, wrist) * 1.15 && dist3d(tip, mcp) > palmSize * 0.70;
+    return verticalExt || radialExt;
+  };
+
+  const isCurled = (tip: Landmark3D, mcp: Landmark3D): boolean => {
+    return dist3d(tip, mcp) < palmSize * 0.75;
+  };
+
+  const isIndexExtended = isExtended(indexTip, indexPip, indexMcp);
+  const isMiddleExtended = isExtended(middleTip, middlePip, middleMcp);
+  const isRingExtended = isExtended(ringTip, ringPip, ringMcp);
+  const isPinkyExtended = isExtended(pinkyTip, pinkyPip, pinkyMcp);
+
+  const isMiddleCurled = isCurled(middleTip, middleMcp);
+  const isRingCurled = isCurled(ringTip, ringMcp);
+  const isPinkyCurled = isCurled(pinkyTip, pinkyMcp);
+
+  // Thumb vertical directions
+  const isThumbUp = thumbTip.y < thumbIp.y && thumbTip.y < indexMcp.y;
+  const isThumbDown = thumbTip.y > thumbIp.y && thumbTip.y > wrist.y;
+
+  // 1. THUMBS UP: Thumb pointing up, other 4 fingers curled
+  if (isThumbUp && !isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
+    const extensionScore = Math.min(1.0, (indexPip.y - thumbTip.y) / (palmSize * 0.8));
+    const confidence = Math.max(0.78, Math.min(0.99, 0.78 + extensionScore * 0.21));
+    return { gesture: 'THUMBS_UP', confidence: parseFloat(confidence.toFixed(2)) };
+  }
+
+  // 2. THUMBS DOWN: Thumb pointing down, other 4 fingers curled (Phase 4 Hardened)
+  if (isThumbDown && !isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
+    const extensionScore = Math.min(1.0, (thumbTip.y - wrist.y) / (palmSize * 0.8));
+    const confidence = Math.max(0.78, Math.min(0.99, 0.78 + extensionScore * 0.21));
+    return { gesture: 'THUMBS_DOWN', confidence: parseFloat(confidence.toFixed(2)) };
+  }
+
+  // 3. FIST: All 4 fingers curled, thumb not pointing up or down
+  if (!isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended && !isThumbUp && !isThumbDown) {
+    const maxFingertipDist = Math.max(
+      dist3d(indexTip, indexMcp),
+      dist3d(middleTip, middleMcp),
+      dist3d(ringTip, ringMcp),
+      dist3d(pinkyTip, pinkyMcp)
+    );
+    if (maxFingertipDist < palmSize * 0.70) {
+      return { gesture: 'FIST', confidence: 0.92 };
+    }
+  }
+
+  // 4. POINTING (Orientation-Robust):
+  // Index finger extended (upwards, horizontal, or forward), while middle, ring, pinky are curled
+  if (isIndexExtended && isMiddleCurled && isRingCurled && isPinkyCurled && !isThumbUp && !isThumbDown) {
+    const pointDist = dist3d(indexTip, indexMcp);
+    const confidence = Math.max(0.78, Math.min(0.98, 0.78 + (pointDist / palmSize) * 0.2));
+    return { gesture: 'POINTING', confidence: parseFloat(confidence.toFixed(2)) };
+  }
+
+  // 5. OPEN PALM: All 4 fingers extended + spread
+  if (isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended) {
+    const spread = dist3d(thumbTip, pinkyTip);
+    const confidence = Math.max(0.82, Math.min(0.99, 0.82 + (spread / (palmSize * 2)) * 0.17));
+    return { gesture: 'OPEN_PALM', confidence: parseFloat(confidence.toFixed(2)) };
+  }
+
+  return { gesture: 'UNKNOWN', confidence: 0.50 };
+}
+
+/**
+ * Multi-Hand Gesture Resolution (Phase 4 Hardened)
+ * Enforces:
+ * 1. FIST Emergency Stop Priority: Any visible hand with FIST overrides all other normal gestures immediately.
+ * 2. Multi-Hand Normal Conflict: If two hands display different normal gestures, marks conflict and suppresses action.
+ * 3. Multi-Hand Agreement: If both hands agree on the same gesture, reinforces confidence.
+ */
+export function resolveMultiHandGestures(
+  multiHands: Landmark3D[][],
+  classifier: (landmarks: Landmark3D[]) => { gesture: string | null; confidence: number } = classifySingleHand
+): MultiHandResolution {
+  if (!multiHands || multiHands.length === 0) {
+    return { dominantGesture: null, confidence: 0.0, isConflicting: false };
+  }
+
+  const classified = multiHands.map((hand, idx) => ({
+    handIdx: idx,
+    ...classifier(hand),
+  }));
+
+  // 1. Emergency Stop Priority (MUST IMPLEMENT #1)
+  // If ANY visible hand is classified as FIST (conf >= 0.75), FIST takes absolute priority!
+  const fistHand = classified.find((c) => c.gesture === 'FIST' && c.confidence >= 0.75);
+  if (fistHand) {
+    return {
+      dominantGesture: 'FIST',
+      confidence: fistHand.confidence,
+      isConflicting: false,
+      statusMessage: 'Emergency Stop Priority Active (Fist Detected)',
+    };
+  }
+
+  // Filter for recognized active gestures (excluding null, NONE, UNKNOWN)
+  const activeGestures = classified.filter(
+    (c) => c.gesture !== null && c.gesture !== 'UNKNOWN' && c.gesture !== 'NONE'
+  );
+
+  if (activeGestures.length === 0) {
+    return { dominantGesture: null, confidence: 0.50, isConflicting: false };
+  }
+
+  if (activeGestures.length === 1) {
+    return {
+      dominantGesture: activeGestures[0].gesture,
+      confidence: activeGestures[0].confidence,
+      isConflicting: false,
+    };
+  }
+
+  // 2. Multi-Hand Normal Conflict (MUST IMPLEMENT #3)
+  const distinctGestures = Array.from(new Set(activeGestures.map((c) => c.gesture)));
+
+  if (distinctGestures.length === 1) {
+    const highestConf = Math.max(...activeGestures.map((c) => c.confidence));
+    return {
+      dominantGesture: distinctGestures[0],
+      confidence: highestConf,
+      isConflicting: false,
+    };
+  }
+
+  // Opposing gestures detected across visible hands
+  return {
+    dominantGesture: null,
+    confidence: 0.50,
+    isConflicting: true,
+    statusMessage: `Multi-Hand Conflict: Opposing gestures (${distinctGestures.join(' vs ')}) detected across hands. Action suspended for safety.`,
+  };
+}
 
 export interface HandTrackerProps {
   onGestureDetected?: (gesture: string, confidence: number) => void;
@@ -130,85 +321,19 @@ export function MediaPipeHandTracker({
   const [dwellProgress, setDwellProgress] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string>('');
 
-  // Temporal Stability & Execution Release Latch
+  // Temporal Stability & Execution Release Latch (Phase 4 Hardened)
   const stabilityBufferRef = useRef<string[]>([]);
   const dwellStartTimeRef = useRef<number | null>(null);
   const isActionExecutedRef = useRef<boolean>(false);
   const currentConfirmedGestureRef = useRef<string | null>(null);
+  const neutralStartTimeRef = useRef<number | null>(null);
 
-  // Real Geometric Classification for an Individual Hand
-  const classifySingleHand = useCallback((landmarks: Landmark3D[]): { gesture: string | null; confidence: number } => {
-    if (!landmarks || landmarks.length < 21) {
-      return { gesture: null, confidence: 0 };
-    }
-
-    const wrist = landmarks[0];
-    const thumbTip = landmarks[4];
-    const thumbIp = landmarks[3];
-    const indexMcp = landmarks[5];
-    const indexPip = landmarks[6];
-    const indexTip = landmarks[8];
-    const middleMcp = landmarks[9];
-    const middlePip = landmarks[10];
-    const middleTip = landmarks[12];
-    const ringMcp = landmarks[13];
-    const ringPip = landmarks[14];
-    const ringTip = landmarks[16];
-    const pinkyMcp = landmarks[17];
-    const pinkyPip = landmarks[18];
-    const pinkyTip = landmarks[20];
-
-    // Vertical extension metrics
-    const isIndexExtended = indexTip.y < indexPip.y && indexTip.y < indexMcp.y;
-    const isMiddleExtended = middleTip.y < middlePip.y && middleTip.y < middleMcp.y;
-    const isRingExtended = ringTip.y < ringPip.y && ringTip.y < ringMcp.y;
-    const isPinkyExtended = pinkyTip.y < pinkyPip.y && pinkyTip.y < pinkyMcp.y;
-    const isThumbUp = thumbTip.y < thumbIp.y && thumbTip.y < indexMcp.y;
-
-    const dist = (p1: Landmark3D, p2: Landmark3D) =>
-      Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
-
-    const palmSize = dist(wrist, middleMcp);
-    if (palmSize < 0.04) {
-      return { gesture: null, confidence: 0 };
-    }
-
-    // 1. THUMBS UP
-    if (isThumbUp && !isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
-      const extensionScore = Math.min(1.0, (indexPip.y - thumbTip.y) / (palmSize * 0.8));
-      const confidence = Math.max(0.78, Math.min(0.99, 0.78 + extensionScore * 0.21));
-      return { gesture: 'THUMBS_UP', confidence: parseFloat(confidence.toFixed(2)) };
-    }
-
-    // 2. POINTING
-    if (isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
-      const pointDist = dist(indexTip, indexMcp);
-      const confidence = Math.max(0.78, Math.min(0.98, 0.78 + (pointDist / palmSize) * 0.2));
-      return { gesture: 'POINTING', confidence: parseFloat(confidence.toFixed(2)) };
-    }
-
-    // 3. OPEN PALM
-    if (isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended) {
-      const spread = dist(thumbTip, pinkyTip);
-      const confidence = Math.max(0.82, Math.min(0.99, 0.82 + (spread / (palmSize * 2)) * 0.17));
-      return { gesture: 'OPEN_PALM', confidence: parseFloat(confidence.toFixed(2)) };
-    }
-
-    // 4. FIST
-    if (!isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended && !isThumbUp) {
-      const maxFingertipDist = Math.max(
-        dist(indexTip, indexMcp),
-        dist(middleTip, middleMcp),
-        dist(ringTip, ringMcp),
-        dist(pinkyTip, pinkyMcp)
-      );
-      if (maxFingertipDist < palmSize * 0.65) {
-        return { gesture: 'FIST', confidence: 0.92 };
-      }
-    }
-
-    return { gesture: 'UNKNOWN', confidence: 0.5 };
-  }, []);
+  // High-frequency UI update throttling refs (Phase 4 Hardening)
+  const prevHandCountRef = useRef<number>(0);
+  const prevActiveGestureRef = useRef<string | null>(null);
+  const prevConfidenceRef = useRef<number>(0);
+  const prevDwellProgressRef = useRef<number>(0);
+  const prevPipelineStatusRef = useRef<GesturePipelineStatus>('CAMERA_INITIALIZING');
 
   // Draw Dual-Hand Skeletal Meshes on Canvas
   const drawAllHandsMesh = useCallback((
@@ -479,20 +604,69 @@ export function MediaPipeHandTracker({
             // =========================================================================
             // STRICT LAYER 1: "IS THERE A HAND?" (NO HAND = 0 GESTURE, NO INTENT)
             // =========================================================================
+            // State Throttling Helpers (MUST IMPLEMENT #7)
+            const safeSetHandCount = (count: number) => {
+              if (prevHandCountRef.current !== count) {
+                prevHandCountRef.current = count;
+                setHandCount(count);
+              }
+            };
+            const safeSetActiveGesture = (gesture: string | null) => {
+              if (prevActiveGestureRef.current !== gesture) {
+                prevActiveGestureRef.current = gesture;
+                setActiveGesture(gesture);
+              }
+            };
+            const safeSetConfidence = (conf: number) => {
+              if (Math.abs(prevConfidenceRef.current - conf) >= 0.05 || (conf === 0 && prevConfidenceRef.current !== 0)) {
+                prevConfidenceRef.current = conf;
+                setRealConfidence(conf);
+              }
+            };
+            const safeSetDwellProgress = (pct: number) => {
+              const quantized = Math.floor(pct / 5) * 5;
+              if (prevDwellProgressRef.current !== quantized) {
+                prevDwellProgressRef.current = quantized;
+                setDwellProgress(quantized);
+              }
+            };
+            const safeSetPipelineStatus = (status: GesturePipelineStatus) => {
+              if (prevPipelineStatusRef.current !== status) {
+                prevPipelineStatusRef.current = status;
+                setPipelineStatus(status);
+              }
+            };
+
+            // =========================================================================
+            // STRICT LAYER 1: "IS THERE A HAND?" (NO HAND = 0 GESTURE, NO INTENT)
+            // =========================================================================
             if (multiHands.length === 0) {
               ctx.clearRect(0, 0, canvas.width, canvas.height);
-              setHandCount(0);
-              setActiveGesture(null);
-              setRealConfidence(0.0);
-              setDwellProgress(0);
+              safeSetHandCount(0);
+              safeSetActiveGesture(null);
+              safeSetConfidence(0.0);
+              safeSetDwellProgress(0);
 
-              // Reset temporal and execution release states
+              // Temporal stability buffer and dwell timer reset
               stabilityBufferRef.current = [];
               dwellStartTimeRef.current = null;
-              isActionExecutedRef.current = false;
-              currentConfirmedGestureRef.current = null;
 
-              setPipelineStatus('SEARCHING_FOR_HAND');
+              // Release-Latch Hysteresis (MUST IMPLEMENT #2):
+              // Latch only re-arms after sustained neutral/no-hand behavior (>= 350ms)
+              if (isActionExecutedRef.current) {
+                if (!neutralStartTimeRef.current) {
+                  neutralStartTimeRef.current = now;
+                }
+                if (now - neutralStartTimeRef.current >= 350) {
+                  isActionExecutedRef.current = false;
+                  currentConfirmedGestureRef.current = null;
+                  neutralStartTimeRef.current = null;
+                }
+              } else {
+                neutralStartTimeRef.current = null;
+              }
+
+              safeSetPipelineStatus('SEARCHING_FOR_HAND');
 
               const cb = callbacksRef.current;
               if (cb.onHandPresenceChange) cb.onHandPresenceChange(false);
@@ -501,26 +675,21 @@ export function MediaPipeHandTracker({
               // =========================================================================
               // LAYER 1 PASSED: 1 OR 2 HANDS DETECTED!
               // =========================================================================
-              setHandCount(multiHands.length);
+              safeSetHandCount(multiHands.length);
 
               const cb = callbacksRef.current;
               if (cb.onHandPresenceChange) cb.onHandPresenceChange(true);
               if (cb.onLandmarksDetected) cb.onLandmarksDetected(multiHands[0]);
 
               // =========================================================================
-              // STRICT LAYER 2: "WHAT ARE THE HANDS DOING?"
+              // STRICT LAYER 2: "WHAT ARE THE HANDS DOING?" (PHASE 4 HARDENED)
+              // Evaluates FIST Emergency Stop Priority (#1) and Multi-Hand Normal Conflict (#3)
               // =========================================================================
-              // Classify primary active hand gesture
-              let dominantGesture: string | null = null;
-              let highestConfidence = 0;
-
-              multiHands.forEach((handLandmarks) => {
-                const { gesture, confidence } = classifySingleHand(handLandmarks);
-                if (gesture && gesture !== 'UNKNOWN' && confidence > highestConfidence) {
-                  dominantGesture = gesture;
-                  highestConfidence = confidence;
-                }
-              });
+              const {
+                dominantGesture,
+                confidence: highestConfidence,
+                isConflicting,
+              } = resolveMultiHandGestures(multiHands, classifySingleHand);
 
               // Draw all detected hands (Left & Right) on the canvas
               drawAllHandsMesh(
@@ -533,43 +702,83 @@ export function MediaPipeHandTracker({
                 highestConfidence
               );
 
-              if (!dominantGesture) {
-                // Hand(s) present, but no recognized gesture pose
-                setActiveGesture(null);
-                setRealConfidence(0.5);
-                setDwellProgress(0);
+              if (isConflicting) {
+                // Multi-Hand Normal Conflict: Suppress normal action emission for safety
+                safeSetActiveGesture(null);
+                safeSetConfidence(0.5);
+                safeSetDwellProgress(0);
                 stabilityBufferRef.current = [];
                 dwellStartTimeRef.current = null;
-                isActionExecutedRef.current = false;
-                setPipelineStatus('HAND_DETECTED');
+                safeSetPipelineStatus('CONFLICT');
+
+                if (cb.onGestureDetected) cb.onGestureDetected('UNKNOWN', 0.5);
+              } else if (!dominantGesture) {
+                // Hand(s) present, but no recognized gesture pose (neutral / unknown)
+                safeSetActiveGesture(null);
+                safeSetConfidence(0.5);
+                safeSetDwellProgress(0);
+                stabilityBufferRef.current = [];
+                dwellStartTimeRef.current = null;
+
+                // Release-Latch Hysteresis on Neutral Hand Pose (>= 350ms)
+                if (isActionExecutedRef.current) {
+                  if (!neutralStartTimeRef.current) {
+                    neutralStartTimeRef.current = now;
+                  }
+                  if (now - neutralStartTimeRef.current >= 350) {
+                    isActionExecutedRef.current = false;
+                    currentConfirmedGestureRef.current = null;
+                    neutralStartTimeRef.current = null;
+                  }
+                } else {
+                  neutralStartTimeRef.current = null;
+                }
+
+                safeSetPipelineStatus('HAND_DETECTED');
 
                 if (cb.onGestureDetected) cb.onGestureDetected('UNKNOWN', 0.5);
               } else {
-                // Recognized gesture on at least one hand
-                setActiveGesture(dominantGesture);
-                setRealConfidence(highestConfidence);
+                // Dominant gesture recognized on at least one hand
+                safeSetActiveGesture(dominantGesture);
+                safeSetConfidence(highestConfidence);
                 if (cb.onGestureDetected) cb.onGestureDetected(dominantGesture, highestConfidence);
 
-                // --- Temporal Stability Buffer (Must persist for >= 3 frames) ---
-                const buffer = stabilityBufferRef.current;
-                buffer.push(dominantGesture);
-                if (buffer.length > 5) buffer.shift();
-
-                const isTemporallyStable =
-                  buffer.length >= 3 && buffer.every((g) => g === dominantGesture);
-
-                if (!isTemporallyStable) {
-                  setPipelineStatus('CLASSIFYING');
-                  setDwellProgress(0);
+                // Check for Valid Gesture Transition (MUST IMPLEMENT #4):
+                // If transitioning from Gesture A to Gesture B, reset execution latch so Gesture B can fire
+                if (
+                  currentConfirmedGestureRef.current !== null &&
+                  dominantGesture !== currentConfirmedGestureRef.current
+                ) {
+                  isActionExecutedRef.current = false;
+                  currentConfirmedGestureRef.current = null;
                   dwellStartTimeRef.current = null;
+                  stabilityBufferRef.current = [];
+                  neutralStartTimeRef.current = null;
+                }
+
+                // If currently matching the already-executed gesture, keep latch locked (jitter immunity)
+                if (isActionExecutedRef.current && currentConfirmedGestureRef.current === dominantGesture) {
+                  neutralStartTimeRef.current = null;
+                  safeSetPipelineStatus('WAIT_FOR_RELEASE');
+                  safeSetDwellProgress(100);
                 } else {
-                  // Temporal stability satisfied
-                  if (isActionExecutedRef.current && currentConfirmedGestureRef.current === dominantGesture) {
-                    // --- Release Latch: Hand still held after execution ---
-                    setPipelineStatus('WAIT_FOR_RELEASE');
-                    setDwellProgress(100);
+                  neutralStartTimeRef.current = null;
+
+                  // --- Temporal Stability Buffer (Must persist for >= 3 consecutive frames) ---
+                  const buffer = stabilityBufferRef.current;
+                  buffer.push(dominantGesture);
+                  if (buffer.length > 5) buffer.shift();
+
+                  const isTemporallyStable =
+                    buffer.length >= 3 && buffer.every((g) => g === dominantGesture);
+
+                  if (!isTemporallyStable) {
+                    safeSetPipelineStatus('CLASSIFYING');
+                    safeSetDwellProgress(0);
+                    dwellStartTimeRef.current = null;
                   } else {
-                    setPipelineStatus('GESTURE_CANDIDATE');
+                    // Temporal stability satisfied
+                    safeSetPipelineStatus('GESTURE_CANDIDATE');
 
                     // --- Dwell Time Accumulator ---
                     if (!dwellStartTimeRef.current) {
@@ -579,11 +788,11 @@ export function MediaPipeHandTracker({
                     const elapsedDwell = now - dwellStartTimeRef.current;
                     const reqDwell = cb.requiredDwellMs || 500;
                     const pct = Math.min(100, Math.round((elapsedDwell / reqDwell) * 100));
-                    setDwellProgress(pct);
+                    safeSetDwellProgress(pct);
 
                     if (pct >= 100 && !isActionExecutedRef.current) {
                       // --- GESTURE CONFIRMED & EXECUTED ONCE ---
-                      setPipelineStatus('GESTURE_CONFIRMED');
+                      safeSetPipelineStatus('GESTURE_CONFIRMED');
                       isActionExecutedRef.current = true;
                       currentConfirmedGestureRef.current = dominantGesture;
 
@@ -715,13 +924,18 @@ export function MediaPipeHandTracker({
       {/* Dwell / Release Progress Bar */}
       {handCount > 0 && activeGesture && (
         <div
+          role="progressbar"
+          aria-label={`Gesture dwell activation progress: ${Math.round(dwellProgress)}%`}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(dwellProgress)}
           style={{
             position: 'absolute',
             bottom: '1rem',
             left: '1.5rem',
             right: '1.5rem',
-            height: '8px',
-            borderRadius: '4px',
+            height: '10px',
+            borderRadius: '5px',
             background: 'rgba(0, 0, 0, 0.75)',
             overflow: 'hidden',
             border: '1px solid rgba(255, 255, 255, 0.2)',
@@ -763,15 +977,18 @@ export function MediaPipeHandTracker({
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span style={{ fontSize: '1rem' }}>
             {handCount === 0 && '🔍'}
-            {handCount > 0 && !activeGesture && '🖐️'}
+            {handCount > 0 && !activeGesture && pipelineStatus !== 'CONFLICT' && '🖐️'}
+            {pipelineStatus === 'CONFLICT' && '⚠️'}
             {activeGesture === 'THUMBS_UP' && '👍'}
+            {activeGesture === 'THUMBS_DOWN' && '👎'}
             {activeGesture === 'POINTING' && '👉'}
             {activeGesture === 'OPEN_PALM' && '✋'}
             {activeGesture === 'FIST' && '✊'}
           </span>
-          <strong style={{ color: handCount > 0 && activeGesture ? 'var(--worker-cyan)' : '#fff' }}>
+          <strong style={{ color: handCount > 0 && activeGesture ? 'var(--worker-cyan)' : pipelineStatus === 'CONFLICT' ? 'var(--accent-amber)' : '#fff' }}>
             {pipelineStatus === 'SEARCHING_FOR_HAND' && 'Searching for Hand(s)...'}
             {pipelineStatus === 'HAND_DETECTED' && `Hand(s) Tracked (${handCount}) • Unknown Pose`}
+            {pipelineStatus === 'CONFLICT' && '⚠️ Multi-Hand Conflict • Action Suspended'}
             {pipelineStatus === 'CLASSIFYING' && `Analyzing ${activeGesture}...`}
             {pipelineStatus === 'GESTURE_CANDIDATE' && `Holding ${activeGesture} (${dwellProgress}%)`}
             {pipelineStatus === 'GESTURE_CONFIRMED' && `✓ ${activeGesture} Confirmed!`}

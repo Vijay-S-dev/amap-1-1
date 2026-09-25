@@ -6,7 +6,7 @@
  * original_message, original_language, translated_message, translation_language.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AssistancePriority } from '@/shared/types';
 import { useAccessibility } from '@/shared/theme/AccessibilityContext';
 import { t } from '@/shared/i18n/languages';
@@ -25,6 +25,65 @@ export function AssistanceModal({ isOpen, onClose, workSessionId }: AssistanceMo
   const [category, setCategory] = useState<string>('part_misalignment');
   const [description, setDescription] = useState<string>('');
   const [submitted, setSubmitted] = useState<boolean>(false);
+
+  const modalRef = useRef<HTMLDivElement | null>(null);
+  const closeBtnRef = useRef<HTMLButtonElement | null>(null);
+  const previousActiveElementRef = useRef<HTMLElement | null>(null);
+
+  // Focus Management: Save trigger, move focus to close button, trap Tab, handle Escape
+  useEffect(() => {
+    if (!isOpen) return;
+
+    // Remember element that triggered the modal
+    previousActiveElementRef.current = document.activeElement as HTMLElement | null;
+
+    // Move focus inside the modal on next tick
+    const timer = setTimeout(() => {
+      closeBtnRef.current?.focus();
+    }, 50);
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        if (!modalRef.current) return;
+        const focusableElements = modalRef.current.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusableElements.length === 0) return;
+
+        const firstElement = focusableElements[0];
+        const lastElement = focusableElements[focusableElements.length - 1];
+
+        if (e.shiftKey) {
+          // Shift + Tab: if on first, cycle to last
+          if (document.activeElement === firstElement) {
+            e.preventDefault();
+            lastElement.focus();
+          }
+        } else {
+          // Tab: if on last, cycle to first
+          if (document.activeElement === lastElement) {
+            e.preventDefault();
+            firstElement.focus();
+          }
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('keydown', handleKeyDown);
+      // Restore focus to trigger element on close
+      previousActiveElementRef.current?.focus();
+    };
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -68,7 +127,11 @@ export function AssistanceModal({ isOpen, onClose, workSessionId }: AssistanceMo
         padding: '1rem',
       }}
     >
-      <div className="glass-panel" style={{ maxWidth: '540px', width: '100%', padding: '2rem', borderRadius: '24px' }}>
+      <div
+        ref={modalRef}
+        className="glass-panel"
+        style={{ maxWidth: '540px', width: '100%', padding: '2rem', borderRadius: '24px' }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
           <div>
             <h2 id="assistance-modal-title" style={{ fontSize: '1.35rem', fontWeight: 800 }}>
@@ -79,11 +142,12 @@ export function AssistanceModal({ isOpen, onClose, workSessionId }: AssistanceMo
             </span>
           </div>
           <button
+            ref={closeBtnRef}
             type="button"
             onClick={onClose}
             aria-label="Close modal"
             className="btn btn-secondary"
-            style={{ minHeight: '36px', padding: '0.25rem 0.65rem' }}
+            style={{ minHeight: '48px', minWidth: '48px', padding: '0.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
           >
             ✕
           </button>
@@ -112,9 +176,10 @@ export function AssistanceModal({ isOpen, onClose, workSessionId }: AssistanceMo
                     key={p}
                     type="button"
                     onClick={() => setPriority(p)}
+                    aria-pressed={priority === p}
                     className="btn btn-secondary"
                     style={{
-                      minHeight: '44px',
+                      minHeight: '48px',
                       textTransform: 'capitalize',
                       fontWeight: 700,
                       borderColor: priority === p ? 'var(--worker-cyan)' : 'transparent',

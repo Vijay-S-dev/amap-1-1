@@ -1,16 +1,20 @@
 /**
  * AMAP API Client
  * Connects frontend UI to FastAPI backend with bearer token management,
- * organization header scoping, and simulated offline mock states.
+ * organization header scoping, and honest error propagation.
+ *
+ * Phase 0 Remediation: Zero silent fake-success or demo mock fallbacks.
+ * The system must fail honestly.
  */
 
 import {
   AssistanceTicket,
-  AuditLogEntry,
   CustomGestureProfile,
   InteractionPreset,
+  MultimodalFusionPayload,
   MultimodalFusionResult,
   MultimodalInput,
+  MultimodalInputItem,
   TaskDetails,
   UserContext,
   WorkerPersonalization,
@@ -19,15 +23,35 @@ import {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000/api/v1';
 
+export class ApiError extends Error {
+  public status?: number;
+  public code?: string;
+  public detail?: any;
+
+  constructor(message: string, status?: number, code?: string, detail?: any) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
 class ApiClient {
   private token: string | null = null;
-  private orgId: string = '00000000-0000-0000-0000-000000000001';
+  private orgId: string = '9a61e05d-7a32-4112-9c17-1833d7b42f65';
 
   constructor() {
     if (typeof window !== 'undefined') {
       const savedToken = localStorage.getItem('amap_token');
       const savedOrg = localStorage.getItem('amap_org_id');
-      if (savedToken) this.token = savedToken;
+      if (savedToken) {
+        this.token = savedToken;
+        // Ensure edge middleware cookie is in sync with localStorage on page refresh
+        if (!document.cookie.includes('amap_token=')) {
+          document.cookie = `amap_token=${savedToken}; path=/; max-age=86400; SameSite=Lax`;
+        }
+      }
       if (savedOrg) this.orgId = savedOrg;
     }
   }
@@ -38,7 +62,22 @@ class ApiClient {
     if (typeof window !== 'undefined') {
       localStorage.setItem('amap_token', token);
       if (orgId) localStorage.setItem('amap_org_id', orgId);
+      // Sync cookie for Edge Middleware route gating
+      document.cookie = `amap_token=${token}; path=/; max-age=86400; SameSite=Lax`;
     }
+  }
+
+  clearAuth() {
+    this.token = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('amap_token');
+      localStorage.removeItem('amap_org_id');
+      document.cookie = 'amap_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
+    }
+  }
+
+  getToken(): string | null {
+    return this.token;
   }
 
   getHeaders(): HeadersInit {
@@ -52,26 +91,113 @@ class ApiClient {
     return headers;
   }
 
+  /**
+   * Centralized HTTP request runner.
+   * Enforces honest failure: network errors, HTTP error codes, and malformed
+   * responses throw structured ApiError instances instead of returning fake mock data.
+   */
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = endpoint.startsWith('http')
+      ? endpoint
+      : `${API_BASE}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'X-Organization-Id': this.orgId,
+      ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
+      ...((options.headers as Record<string, string>) || {}),
+    };
+
+    let res: Response;
+    try {
+      res = await fetch(url, { ...options, headers });
+    } catch (err: any) {
+      throw new ApiError(
+        `Backend service unreachable at ${url}: ${err?.message || 'Network error'}`,
+        undefined,
+        'NETWORK_ERROR',
+        err
+      );
+    }
+
+    if (!res.ok) {
+      let detail: any = null;
+      try {
+        const errJson = await res.json();
+        detail = errJson.detail || errJson.error || errJson;
+      } catch {
+        try {
+          detail = await res.text();
+        } catch {
+          detail = null;
+        }
+      }
+
+      const message =
+        typeof detail === 'string'
+          ? detail
+          : detail?.message || `API request failed with HTTP ${res.status}`;
+
+      throw new ApiError(message, res.status, `HTTP_${res.status}`, detail);
+    }
+
+    // Handle 204 No Content
+    if (res.status === 204) {
+      return {} as T;
+    }
+
+    try {
+      return (await res.json()) as T;
+    } catch (err: any) {
+      throw new ApiError(
+        `Failed to parse response from ${url}: ${err?.message || 'Malformed JSON'}`,
+        res.status,
+        'PARSE_ERROR',
+        err
+      );
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // Authentication & Identity Endpoints
+  // --------------------------------------------------------------------------
+
+  async login(payload: {
+    organization_id: string;
+    email: string;
+    password: string;
+  }): Promise<{ access_token: string; token_type: string; expires_in: number }> {
+    const data = await this.request<{
+      access_token: string;
+      token_type: string;
+      expires_in: number;
+    }>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    this.setAuth(data.access_token, payload.organization_id);
+    return data;
+  }
+
+  async getMe(): Promise<UserContext> {
+    const raw = await this.request<any>('/auth/me');
+    return {
+      userId: raw.user_id || raw.id || raw.userId,
+      organizationId: raw.organization_id || raw.organizationId,
+      email: raw.email,
+      fullName: raw.full_name || raw.fullName || raw.email,
+      roles: raw.roles || [],
+      permissions: raw.permissions || [],
+      workerProfileId: raw.worker_profile_id || raw.workerProfileId || undefined,
+    };
+  }
+
   // --------------------------------------------------------------------------
   // Worker & Session Endpoints
   // --------------------------------------------------------------------------
 
   async getActiveSession(): Promise<WorkSession> {
-    try {
-      const res = await fetch(`${API_BASE}/sessions/active`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback for offline/demo
-    }
-    return {
-      id: 'ws-78192-demo',
-      workerProfileId: 'wp-001',
-      organizationId: this.orgId,
-      stationId: 'Assembly Station 4B (Robotic Feeder)',
-      status: 'active',
-      startedAt: new Date().toISOString(),
-      activeTaskId: 'task-gearbox-assembly-01',
-    };
+    return await this.request<WorkSession>('/sessions/active');
   }
 
   async getWorkerReadiness(workerId: string): Promise<{
@@ -88,26 +214,7 @@ class ApiClient {
     completed_stages: string[];
     active_preferences: Record<string, any>;
   }> {
-    try {
-      const res = await fetch(`${API_BASE}/workers/${workerId}/readiness`, {
-        headers: this.getHeaders(),
-      });
-      if (res.ok) return await res.json();
-    } catch {}
-    return {
-      worker_id: workerId,
-      is_fresher: true,
-      onboarding_completed: false,
-      readiness_status: 'incomplete',
-      interaction_mode: 'multimodal',
-      gesture_ready: false,
-      voice_ready: false,
-      multimodal_ready: false,
-      task_training_complete: false,
-      overall_ready: false,
-      completed_stages: [],
-      active_preferences: {},
-    };
+    return await this.request(`/workers/${workerId}/readiness`);
   }
 
   async certifyWorkerReadiness(
@@ -123,76 +230,93 @@ class ApiClient {
       task_training_complete: boolean;
     }
   ): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/workers/${workerId}/readiness/certify`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return await res.json();
-    } catch {}
-    return {
-      worker_id: workerId,
-      overall_ready: true,
-      readiness_status: 'ready',
-    };
+    return await this.request(`/workers/${workerId}/readiness/certify`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getAssignedTasks(): Promise<any[]> {
+    return await this.request<any[]>('/tasks/assigned');
+  }
+
+  async startTaskAssignment(assignmentId: string): Promise<any> {
+    return await this.request<any>(`/tasks/assignments/${assignmentId}/start`, {
+      method: 'POST',
+    });
   }
 
   async getTaskDetails(taskId: string): Promise<TaskDetails> {
-    try {
-      const res = await fetch(`${API_BASE}/tasks/${taskId}`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
+    return await this.request<TaskDetails>(`/tasks/${taskId}`);
+  }
+
+  async executeAction(payload: {
+    action_name: string;
+    work_session_id?: string | null;
+    workflow_step_id?: string | null;
+    task_id?: string | null;
+    parameters?: Record<string, any>;
+  }): Promise<{
+    success: boolean;
+    action_id: string;
+    action_name: string;
+    executed_at: string;
+    result_data?: Record<string, any>;
+    feedback_message?: string;
+  }> {
+    return await this.request('/actions/execute', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async recordStepExecution(
+    workflowAssignmentId: string,
+    stepId: string,
+    payload: {
+      status: string;
+      execution_data?: Record<string, any>;
     }
-    return {
-      id: taskId,
-      organizationId: this.orgId,
-      name: 'High-Precision Gearbox Assembly (Subsystem A)',
-      description: 'Mount primary planetary drive shaft and torque-check fasteners.',
-      status: 'in_progress',
-      totalSteps: 4,
-      currentStepIndex: 1,
-      steps: [
-        {
-          id: 'step-1',
-          stepNumber: 1,
-          title: 'Mount Drive Shaft',
-          instructionText: 'Align drive shaft notch with housing notch at 0° mark. Slide until seated.',
-          expectedDurationSeconds: 45,
-          spatialTargetId: 'HOUSING-NOTCH-A',
-          requiredModality: 'gesture',
-          completed: true,
-        },
-        {
-          id: 'step-2',
-          stepNumber: 2,
-          title: 'Insert Planetary Gear Bearings',
-          instructionText: 'Place 3 planetary gear bearings over planetary pins. Confirm seating with thumbs-up.',
-          expectedDurationSeconds: 60,
-          spatialTargetId: 'PIN-CLUSTER-3',
-          requiredModality: 'gesture',
-        },
-        {
-          id: 'step-3',
-          stepNumber: 3,
-          title: 'Apply Synthetic Lubricant (Grade 4)',
-          instructionText: 'Dispense 5ml lubricant evenly onto planetary mesh teeth. Say "Next" or Point to proceed.',
-          expectedDurationSeconds: 30,
-          spatialTargetId: 'GEAR-MESH-SURFACE',
-          requiredModality: 'voice',
-        },
-        {
-          id: 'step-4',
-          stepNumber: 4,
-          title: 'Install Enclosure Cover & Fasten Screws',
-          instructionText: 'Place top housing plate. Cross-torque 4 M6 hex screws to 12.5 Nm.',
-          expectedDurationSeconds: 90,
-          spatialTargetId: 'SCREW-POSITIONS-4',
-          requiredModality: 'gesture',
-        },
-      ],
-    };
+  ): Promise<any> {
+    return await this.request(
+      `/tasks/workflows/assignments/${workflowAssignmentId}/steps/${stepId}/execute`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  async completeTaskAssignment(
+    assignmentId: string,
+    payload: {
+      outcome?: string;
+      result_data?: Record<string, any>;
+      notes?: string;
+    }
+  ): Promise<any> {
+    return await this.request(`/tasks/assignments/${assignmentId}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({
+        outcome: payload.outcome || 'completed',
+        result_data: payload.result_data || null,
+        notes: payload.notes || null,
+      }),
+    });
+  }
+
+  async cancelTaskAssignment(
+    assignmentId: string,
+    notes?: string
+  ): Promise<any> {
+    return await this.request(`/tasks/assignments/${assignmentId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ notes: notes || null }),
+    });
+  }
+
+  async getTaskResult(assignmentId: string): Promise<any> {
+    return await this.request(`/tasks/assignments/${assignmentId}/result`);
   }
 
   // --------------------------------------------------------------------------
@@ -205,9 +329,8 @@ class ApiClient {
     samples: { x: number; y: number; z?: number }[][];
     handedness?: string;
   }): Promise<CustomGestureProfile> {
-    const res = await fetch(`${API_BASE}/gestures/custom/train`, {
+    return await this.request<CustomGestureProfile>('/gestures/custom/train', {
       method: 'POST',
-      headers: this.getHeaders(),
       body: JSON.stringify({
         gesture_name: payload.gesture_name,
         intent: payload.intent,
@@ -215,35 +338,20 @@ class ApiClient {
         handedness: payload.handedness || 'Right',
       }),
     });
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Failed to train custom gesture.' }));
-      throw new Error(err.detail || 'Failed to train custom gesture.');
-    }
-    return await res.json();
   }
 
   async getCustomGestures(): Promise<CustomGestureProfile[]> {
-    try {
-      const res = await fetch(`${API_BASE}/gestures/custom`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return [];
+    return await this.request<CustomGestureProfile[]>('/gestures/custom');
   }
 
   async deleteCustomGesture(gestureId: string): Promise<boolean> {
-    try {
-      const res = await fetch(`${API_BASE}/gestures/custom/${gestureId}`, {
-        method: 'DELETE',
-        headers: this.getHeaders(),
-      });
-      return res.ok;
-    } catch {
-      return false;
-    }
+    await this.request(`/gestures/custom/${gestureId}`, { method: 'DELETE' });
+    return true;
   }
+
+  // --------------------------------------------------------------------------
+  // Voice & Audio Endpoints
+  // --------------------------------------------------------------------------
 
   async processVoiceCommand(payload: {
     raw_transcript: string;
@@ -259,61 +367,160 @@ class ApiClient {
     validation_status: string;
     message?: string;
   }> {
-    const res = await fetch(`${API_BASE}/voice/process-command`, {
+    return await this.request('/voice/process-command', {
       method: 'POST',
-      headers: this.getHeaders(),
       body: JSON.stringify({
         raw_transcript: payload.raw_transcript,
-        confidence: payload.confidence ?? 0.90,
+        confidence: payload.confidence ?? 0.9,
         language: payload.language || 'en-US',
         work_session_id: payload.work_session_id || null,
       }),
     });
+  }
+
+  async transcribeAudio(
+    audioBlob: Blob,
+    language?: string
+  ): Promise<{
+    transcript: string;
+    language: string;
+    detected_language: string;
+    confidence: number;
+    processing_time_ms: number;
+    success: boolean;
+  }> {
+    const formData = new FormData();
+    const extension = audioBlob.type.includes('webm')
+      ? 'webm'
+      : audioBlob.type.includes('ogg')
+      ? 'ogg'
+      : audioBlob.type.includes('mp4')
+      ? 'mp4'
+      : 'wav';
+    formData.append('audio', audioBlob, `voice-command.${extension}`);
+    if (language) formData.append('language', language.split('-')[0]);
+
+    const headers: Record<string, string> = { 'X-Organization-Id': this.orgId };
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/voice/transcribe`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+    } catch (err: any) {
+      throw new ApiError(
+        `Transcription service unreachable: ${err?.message || 'Network error'}`,
+        undefined,
+        'NETWORK_ERROR',
+        err
+      );
+    }
 
     if (!res.ok) {
-      throw new Error(`Voice processing failed with HTTP ${res.status}`);
+      const detail = await res.text().catch(() => '');
+      throw new ApiError(
+        `Audio transcription failed with HTTP ${res.status}${detail ? `: ${detail}` : ''}`,
+        res.status,
+        `HTTP_${res.status}`
+      );
     }
-    return await res.json();
+
+    const result = await res.json();
+    return { ...result, language: result.detected_language };
   }
 
   // --------------------------------------------------------------------------
-  // Multimodal & AI Perception Endpoints
+  // Multimodal & Safety Endpoints
   // --------------------------------------------------------------------------
 
-  async processMultimodalIntent(input: MultimodalInput): Promise<MultimodalFusionResult> {
-    try {
-      const res = await fetch(`${API_BASE}/multimodal/fuse`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(input),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
+  async processMultimodalIntent(
+    payloadOrInput: MultimodalFusionPayload | MultimodalInputItem[] | MultimodalInputItem
+  ): Promise<MultimodalFusionResult> {
+    let inputs: any[] = [];
+    let temporalWindowMs = 1500;
+    let workSessionId: string | null = null;
+    let clientContext: Record<string, any> = {};
+
+    if (payloadOrInput && 'inputs' in payloadOrInput && Array.isArray((payloadOrInput as any).inputs)) {
+      inputs = (payloadOrInput as MultimodalFusionPayload).inputs;
+      temporalWindowMs = (payloadOrInput as any).temporal_window_ms || (payloadOrInput as any).temporalWindowMs || 1500;
+      workSessionId = (payloadOrInput as any).work_session_id || null;
+      clientContext = (payloadOrInput as any).client_context || {};
+    } else if (Array.isArray(payloadOrInput)) {
+      inputs = payloadOrInput;
+    } else if (payloadOrInput) {
+      inputs = [payloadOrInput];
     }
 
+    const formattedInputs = inputs.map((item) => ({
+      mode: typeof item.mode === 'string' ? item.mode.toLowerCase() : item.mode,
+      raw_intent: item.raw_intent || item.rawIntent || '',
+      confidence: item.confidence ?? 0.9,
+      timestamp_ms: item.timestamp_ms ?? item.timestampMs ?? Date.now(),
+      context_data: item.context_data || item.contextData || {},
+    }));
+
+    const rawResult = await this.request<any>('/multimodal/fuse', {
+      method: 'POST',
+      body: JSON.stringify({
+        inputs: formattedInputs,
+        temporal_window_ms: temporalWindowMs,
+        work_session_id: workSessionId,
+        client_context: clientContext,
+      }),
+    });
+
     return {
-      fusedAction: input.rawIntent === 'confirm' ? 'confirm_action' : 'next_step',
-      fusedConfidence: 0.94,
-      fusionStrategy: 'single_mode',
-      requiresConfirmation: false,
-      contributingModes: [input.mode],
-      validationStatus: 'valid',
+      fused_action: rawResult.fused_action ?? rawResult.fusedAction ?? null,
+      fused_confidence: rawResult.fused_confidence ?? rawResult.fusedConfidence ?? 0,
+      fusion_strategy: rawResult.fusion_strategy ?? rawResult.fusionStrategy ?? 'single_mode',
+      requires_confirmation: rawResult.requires_confirmation ?? rawResult.requiresConfirmation ?? false,
+      contributing_modes: rawResult.contributing_modes ?? rawResult.contributingModes ?? [],
+      target_context: rawResult.target_context ?? rawResult.targetContext ?? {},
+      validation_status: rawResult.validation_status ?? rawResult.validationStatus ?? 'valid',
+      message: rawResult.message,
+      // camelCase aliases
+      fusedAction: rawResult.fused_action ?? rawResult.fusedAction ?? null,
+      fusedConfidence: rawResult.fused_confidence ?? rawResult.fusedConfidence ?? 0,
+      fusionStrategy: rawResult.fusion_strategy ?? rawResult.fusionStrategy ?? 'single_mode',
+      requiresConfirmation: rawResult.requires_confirmation ?? rawResult.requiresConfirmation ?? false,
+      contributingModes: rawResult.contributing_modes ?? rawResult.contributingModes ?? [],
+      targetContext: rawResult.target_context ?? rawResult.targetContext ?? {},
+      validationStatus: rawResult.validation_status ?? rawResult.validationStatus ?? 'valid',
     };
   }
 
-  async triggerSafetyStop(reason: string): Promise<{ success: boolean; eventId: string }> {
-    try {
-      const res = await fetch(`${API_BASE}/actions/emergency-stop`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({ reason }),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return { success: true, eventId: 'evt-safety-' + Date.now() };
+  /**
+   * Safety-critical Emergency Stop Trigger.
+   * Software prototype safety boundary: records an emergency stop event,
+   * creates an urgent supervisor assistance request, and returns confirmation.
+   * Fails closed on network or backend failure (never returns fake success).
+   */
+  async triggerSafetyStop(
+    reason: string,
+    workSessionId?: string
+  ): Promise<{ success: boolean; eventId: string; message?: string }> {
+    const res = await this.request<{
+      success: boolean;
+      event_id?: string;
+      eventId?: string;
+      message?: string;
+    }>('/actions/emergency-stop', {
+      method: 'POST',
+      body: JSON.stringify({
+        reason,
+        work_session_id: workSessionId || null,
+      }),
+    });
+
+    return {
+      success: res.success,
+      eventId: res.eventId || res.event_id || 'evt-safety',
+      message: res.message,
+    };
   }
 
   async requestAssistance(data: {
@@ -322,39 +529,26 @@ class ApiClient {
     priority: string;
     workSessionId?: string;
   }): Promise<{ ticketId: string; status: string }> {
-    try {
-      const res = await fetch(`${API_BASE}/assistance/request`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(data),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return { ticketId: 'tick-' + Math.floor(Math.random() * 90000 + 10000), status: 'pending' };
-  }
-
-  async getPersonalization(): Promise<WorkerPersonalization> {
-    try {
-      const res = await fetch(`${API_BASE}/personalization/me`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
+    const res = await this.request<any>('/assistance/requests', {
+      method: 'POST',
+      body: JSON.stringify({
+        reason: data.description || data.category,
+        priority: data.priority || 'normal',
+        work_session_id: data.workSessionId || null,
+      }),
+    });
     return {
-      id: 'pers-001',
-      workerProfileId: 'wp-001',
-      dwellTimeMs: 450,
-      primaryModality: 'gesture',
-      highContrast: false,
-      fontSizeMultiplier: 1.0,
-      voiceConfirmationRequired: false,
+      ticketId: res.id || res.ticketId || 'ack',
+      status: res.status || 'open',
     };
   }
 
+  async getPersonalization(): Promise<WorkerPersonalization> {
+    return await this.request<WorkerPersonalization>('/personalization/me');
+  }
+
   // --------------------------------------------------------------------------
-  // Supervisor / Organization Real Backend Endpoints
+  // Supervisor Endpoints
   // --------------------------------------------------------------------------
 
   async getSupervisorDashboard(): Promise<{
@@ -368,219 +562,19 @@ class ApiClient {
     current_workload_percent: number;
     emergency_stops_active: number;
   }> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/dashboard`, { headers: this.getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.active_workers_count > 0) return data;
-      }
-    } catch (err) {
-      console.warn('[AMAP Supervisor] Dashboard fetch fallback:', err);
-    }
-    return {
-      active_workers_count: 5,
-      available_workers_count: 1,
-      workers_in_task_count: 3,
-      workers_requesting_assistance_count: 1,
-      completed_tasks_count: 19,
-      in_progress_tasks_count: 3,
-      failed_tasks_count: 0,
-      current_workload_percent: 75.0,
-      emergency_stops_active: 0,
-    };
+    return await this.request('/supervisor/dashboard');
   }
 
   async getSupervisorWorkers(): Promise<any[]> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/workers`, { headers: this.getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.length > 0) return data;
-      }
-    } catch (err) {
-      console.warn('[AMAP Supervisor] Workers fetch fallback:', err);
-    }
-    return [
-      {
-        worker_profile_id: 'd0000000-0000-0000-0000-000000000001',
-        user_id: 'c0000000-0000-0000-0000-000000000003',
-        full_name: 'Alex Morgan',
-        email: 'alex.worker@amap.com',
-        status: 'WORKING',
-        current_task_id: 'e0000000-0000-0000-0000-000000000001',
-        current_task_name: 'Inverter Sub-Assembly Alpha',
-        progress_percent: 66.7,
-        current_step_title: 'Step 2: Primary Busbar Torquing',
-        current_step_number: 2,
-        total_steps: 3,
-        interaction_mode: 'multimodal',
-        interaction_health: { gesture_ready: true, voice_ready: true, multimodal_ready: true },
-        session_duration_seconds: 1840,
-        has_open_assistance: false,
-        is_emergency_stop: false,
-      },
-      {
-        worker_profile_id: 'd0000000-0000-0000-0000-000000000002',
-        user_id: 'c0000000-0000-0000-0000-000000000004',
-        full_name: 'Jordan Lee',
-        email: 'jordan.worker@amap.com',
-        status: 'AVAILABLE',
-        current_task_id: undefined,
-        current_task_name: undefined,
-        progress_percent: 0.0,
-        interaction_mode: 'gesture',
-        interaction_health: { gesture_ready: true, voice_ready: false, multimodal_ready: false },
-        session_duration_seconds: 3600,
-        has_open_assistance: false,
-        is_emergency_stop: false,
-      },
-      {
-        worker_profile_id: 'd0000000-0000-0000-0000-000000000003',
-        user_id: 'c0000000-0000-0000-0000-000000000005',
-        full_name: 'Samira Chen',
-        email: 'samira.chen@amap.com',
-        status: 'ASSISTANCE_REQUESTED',
-        current_task_id: 'e0000000-0000-0000-0000-000000000002',
-        current_task_name: 'High-Voltage Isolation Check',
-        progress_percent: 85.0,
-        current_step_title: 'Step 3: Dielectric Safety Check',
-        current_step_number: 3,
-        total_steps: 3,
-        interaction_mode: 'voice',
-        interaction_health: { gesture_ready: false, voice_ready: true, multimodal_ready: false },
-        session_duration_seconds: 2420,
-        has_open_assistance: true,
-        is_emergency_stop: false,
-      },
-      {
-        worker_profile_id: 'd0000000-0000-0000-0000-000000000004',
-        user_id: 'c0000000-0000-0000-0000-000000000006',
-        full_name: 'Kenji Sato',
-        email: 'kenji.sato@amap.com',
-        status: 'WORKING',
-        current_task_id: 'e0000000-0000-0000-0000-000000000003',
-        current_task_name: 'Planetary Gearbox Assembly',
-        progress_percent: 40.0,
-        current_step_title: 'Step 1: Alignment Pin Check',
-        current_step_number: 1,
-        total_steps: 4,
-        interaction_mode: 'multimodal',
-        interaction_health: { gesture_ready: true, voice_ready: true, multimodal_ready: true },
-        session_duration_seconds: 1180,
-        has_open_assistance: false,
-        is_emergency_stop: false,
-      },
-      {
-        worker_profile_id: 'd0000000-0000-0000-0000-000000000005',
-        user_id: 'c0000000-0000-0000-0000-000000000007',
-        full_name: 'Maria Rodriguez',
-        email: 'maria.newhire@amap.com',
-        status: 'COMPLETED',
-        current_task_id: 'e0000000-0000-0000-0000-000000000001',
-        current_task_name: 'Optical Component Inspection',
-        progress_percent: 100.0,
-        current_step_title: 'Step 3: Final Verification',
-        current_step_number: 3,
-        total_steps: 3,
-        interaction_mode: 'multimodal',
-        interaction_health: { gesture_ready: true, voice_ready: true, multimodal_ready: true },
-        session_duration_seconds: 2850,
-        has_open_assistance: false,
-        is_emergency_stop: false,
-      },
-    ];
+    return await this.request<any[]>('/supervisor/workers');
   }
 
   async getSupervisorWorkerDetail(workerId: string): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/workers/${workerId}`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-
-    const workers = await this.getSupervisorWorkers();
-    const match = workers.find((w) => w.worker_profile_id === workerId) || workers[0];
-
-    return {
-      ...match,
-      step_details: [
-        {
-          step_number: 1,
-          title: 'Optical Component Inspection',
-          description: 'Verify thermal paste application and capacitor polarity on PCB bed.',
-          status: 'completed',
-          is_current: false,
-        },
-        {
-          step_number: 2,
-          title: 'Primary Busbar Torquing',
-          description: 'Align copper busbar and torque M6 fasteners to 9.2 Nm in star pattern.',
-          status: match.progress_percent >= 66 ? 'in_progress' : 'pending',
-          is_current: match.progress_percent >= 66 && match.progress_percent < 100,
-        },
-        {
-          step_number: 3,
-          title: 'High Voltage Isolation Check',
-          description: 'Connect dielectric probe to safety terminal and engage automated 500V test.',
-          status: match.progress_percent === 100 ? 'completed' : 'pending',
-          is_current: match.progress_percent === 100,
-        },
-      ],
-      recent_assistance_requests: [
-        {
-          id: 'ast-001',
-          reason: 'Dielectric probe calibration error on step 3',
-          status: 'open',
-          requested_at: '12 mins ago',
-        },
-      ],
-      recent_task_assignments: [
-        {
-          id: 'assign-001',
-          task_name: match.current_task_name || 'Inverter Sub-Assembly Alpha',
-          assigned_at: '30 mins ago',
-        },
-      ],
-    };
+    return await this.request(`/supervisor/workers/${workerId}`);
   }
 
   async getSupervisorTasks(): Promise<any[]> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/tasks`, { headers: this.getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.length > 0) return data;
-      }
-    } catch (err) {
-      console.warn('[AMAP Supervisor] Tasks fetch fallback:', err);
-    }
-    return [
-      {
-        id: 'e0000000-0000-0000-0000-000000000001',
-        name: 'Inverter Sub-Assembly Alpha',
-        description: 'Precision power electronics mounting and high-voltage busbar sequence',
-        status: 'active',
-      },
-      {
-        id: 'e0000000-0000-0000-0000-000000000002',
-        name: 'High-Voltage Isolation Check',
-        description: 'Dielectric insulation resistance check and automated ground bonding verification',
-        status: 'active',
-      },
-      {
-        id: 'e0000000-0000-0000-0000-000000000003',
-        name: 'Planetary Gearbox Assembly',
-        description: 'High-torque reduction gear calibration and planetary bearing seat',
-        status: 'active',
-      },
-      {
-        id: 'e0000000-0000-0000-0000-000000000004',
-        name: 'Structural Chassis Bracket Mounting',
-        description: 'Chassis reinforcement mount with torque angle specification',
-        status: 'active',
-      },
-    ];
+    return await this.request<any[]>('/supervisor/tasks');
   }
 
   async assignSupervisorTask(payload: {
@@ -588,93 +582,34 @@ class ApiClient {
     worker_profile_id: string;
     notes?: string;
   }): Promise<{ message: string; assignment?: any }> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/tasks/assign`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return {
-      message: 'Task successfully assigned to worker.',
-      assignment: { id: 'asgn-' + Date.now(), ...payload },
-    };
+    return await this.request('/supervisor/tasks/assign', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   async reassignSupervisorTask(
     assignmentId: string,
     payload: { new_worker_profile_id: string; reason?: string }
   ): Promise<{ message: string; new_assignment?: any }> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/tasks/${assignmentId}/reassign`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return {
-      message: 'Task successfully reassigned.',
-      new_assignment: { id: 'asgn-' + Date.now(), ...payload },
-    };
+    return await this.request(`/supervisor/tasks/${assignmentId}/reassign`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   async getSupervisorAssistance(statusFilter?: string, priorityFilter?: string): Promise<any[]> {
-    try {
-      const params = new URLSearchParams();
-      if (statusFilter) params.append('status', statusFilter);
-      if (priorityFilter) params.append('priority', priorityFilter);
-      const url = `${API_BASE}/supervisor/assistance${params.toString() ? `?${params.toString()}` : ''}`;
-      const res = await fetch(url, { headers: this.getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.length > 0) return data;
-      }
-    } catch (err) {
-      console.warn('[AMAP Supervisor] Assistance fetch fallback:', err);
-    }
-    return [
-      {
-        id: '70000000-0000-0000-0000-000000000001',
-        worker_name: 'Samira Chen',
-        task_name: 'High-Voltage Isolation Check',
-        priority: 'high',
-        reason: 'Dielectric probe calibration error on step 3.',
-        status: 'open',
-        is_emergency: false,
-        requested_at: '12 mins ago',
-        request_data: {},
-      },
-      {
-        id: '70000000-0000-0000-0000-000000000002',
-        worker_name: 'Alex Morgan',
-        task_name: 'Inverter Sub-Assembly Alpha',
-        priority: 'normal',
-        reason: 'Capacitor polarity marking clarification requested on Step 1.',
-        status: 'in_progress',
-        is_emergency: false,
-        requested_at: '25 mins ago',
-        request_data: { supervisor_guidance: 'Verify silver stripe aligns with thermal bed notch.' },
-      },
-    ];
+    const params = new URLSearchParams();
+    if (statusFilter) params.append('status', statusFilter);
+    if (priorityFilter) params.append('priority', priorityFilter);
+    const qs = params.toString();
+    return await this.request<any[]>(`/supervisor/assistance${qs ? `?${qs}` : ''}`);
   }
 
   async acknowledgeSupervisorAssistance(requestId: string): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/assistance/${requestId}/acknowledge`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return { message: 'Assistance request acknowledged.' };
+    return await this.request(`/supervisor/assistance/${requestId}/acknowledge`, {
+      method: 'POST',
+    });
   }
 
   async respondSupervisorAssistance(
@@ -682,116 +617,32 @@ class ApiClient {
     guidanceMessage: string,
     resolutionAction?: string
   ): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/assistance/${requestId}/respond`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({
-          guidance_message: guidanceMessage,
-          resolution_action: resolutionAction,
-        }),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return { message: 'Supervisor guidance transmitted to worker.' };
+    return await this.request(`/supervisor/assistance/${requestId}/respond`, {
+      method: 'POST',
+      body: JSON.stringify({
+        guidance_message: guidanceMessage,
+        resolution_action: resolutionAction,
+      }),
+    });
   }
 
   async resolveSupervisorAssistance(requestId: string, resolutionNotes?: string): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/assistance/${requestId}/resolve`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify({ resolution_notes: resolutionNotes }),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return { message: 'Assistance request successfully resolved.' };
+    return await this.request(`/supervisor/assistance/${requestId}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution_notes: resolutionNotes }),
+    });
   }
 
   async getSupervisorEmergencyEvents(): Promise<any[]> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/emergency-events`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch (err) {
-      console.warn('[AMAP Supervisor] Emergency events fetch fallback:', err);
-    }
-    return [];
+    return await this.request<any[]>('/supervisor/emergency-events');
   }
 
   async getSupervisorAnalytics(): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/analytics`, { headers: this.getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.tasks_assigned_count > 0) return data;
-      }
-    } catch (err) {
-      console.warn('[AMAP Supervisor] Analytics fetch fallback:', err);
-    }
-    return {
-      tasks_assigned_count: 24,
-      tasks_completed_count: 19,
-      tasks_in_progress_count: 3,
-      average_task_duration_minutes: 7.8,
-      workflow_completion_rate: 94.2,
-      total_assistance_requests: 6,
-      resolved_assistance_requests: 5,
-      average_resolution_time_minutes: 1.4,
-      emergency_stops_count: 0,
-    };
+    return await this.request('/supervisor/analytics');
   }
 
   async getSupervisorAudit(limit: number = 50): Promise<any[]> {
-    try {
-      const res = await fetch(`${API_BASE}/supervisor/audit?limit=${limit}`, { headers: this.getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.length > 0) return data;
-      }
-    } catch (err) {
-      console.warn('[AMAP Supervisor] Audit timeline fetch fallback:', err);
-    }
-    return [
-      {
-        id: 'aud-001',
-        event_type: 'supervisor_task_assigned',
-        actor_name: 'Marcus Vance (Supervisor)',
-        resource_type: 'worker_task_assignment',
-        occurred_at: new Date(Date.now() - 2 * 60000).toISOString(),
-      },
-      {
-        id: 'aud-002',
-        event_type: 'supervisor_assistance_guidance_sent',
-        actor_name: 'Marcus Vance (Supervisor)',
-        resource_type: 'assistance_request',
-        occurred_at: new Date(Date.now() - 14 * 60000).toISOString(),
-      },
-      {
-        id: 'aud-003',
-        event_type: 'supervisor_assistance_acknowledged',
-        actor_name: 'Marcus Vance (Supervisor)',
-        resource_type: 'assistance_request',
-        occurred_at: new Date(Date.now() - 22 * 60000).toISOString(),
-      },
-      {
-        id: 'aud-004',
-        event_type: 'worker_task_completed',
-        actor_name: 'Maria Rodriguez (Worker)',
-        resource_type: 'task',
-        occurred_at: new Date(Date.now() - 45 * 60000).toISOString(),
-      },
-      {
-        id: 'aud-005',
-        event_type: 'interaction_preset_adapted',
-        actor_name: 'System Adaptation Engine',
-        resource_type: 'worker_personalization',
-        occurred_at: new Date(Date.now() - 90 * 60000).toISOString(),
-      },
-    ];
+    return await this.request<any[]>(`/supervisor/audit?limit=${limit}`);
   }
 
   async getPendingAssistanceTickets(): Promise<AssistanceTicket[]> {
@@ -814,7 +665,7 @@ class ApiClient {
   }
 
   // --------------------------------------------------------------------------
-  // Admin Endpoints
+  // Static UI Presets (Legitimate static configuration - preserved)
   // --------------------------------------------------------------------------
 
   async getInteractionPresets(): Promise<InteractionPreset[]> {
@@ -826,7 +677,7 @@ class ApiClient {
         status: 'active',
         dwellTimeMs: 450,
         gestureSensitivity: 0.85,
-        acousticFloor: 0.60,
+        acousticFloor: 0.6,
       },
       {
         id: 'preset-2',
@@ -834,7 +685,7 @@ class ApiClient {
         description: 'Elevated acoustic threshold with mandatory gesture confirmation.',
         status: 'active',
         dwellTimeMs: 600,
-        gestureSensitivity: 0.90,
+        gestureSensitivity: 0.9,
         acousticFloor: 0.75,
       },
     ];
@@ -845,461 +696,112 @@ class ApiClient {
   // --------------------------------------------------------------------------
 
   async getOrgDashboard(): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/dashboard`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch (err) {
-      console.warn('[AMAP Enterprise Org] Dashboard fetch fallback:', err);
-    }
-    return {
-      organization_id: '9a61e05d-7a32-4112-9c17-1833d7b42f65',
-      organization_name: 'Acme Motors — Assembly Plant 1',
-      total_workers_count: 5,
-      active_workers_count: 4,
-      available_workers_count: 1,
-      supervisors_count: 2,
-      departments_count: 3,
-      active_tasks_count: 3,
-      completed_tasks_count: 19,
-      pending_tasks_count: 2,
-      open_assistance_requests_count: 1,
-      emergency_events_count: 0,
-      current_line_utilization_percent: 75.0,
-    };
+    return await this.request('/organizations/manage/dashboard');
   }
 
   async getOrgProfile(): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/profile`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch (err) {
-      console.warn('[AMAP Enterprise Org] Profile fetch fallback:', err);
-    }
-    return {
-      id: '9a61e05d-7a32-4112-9c17-1833d7b42f65',
-      name: 'Acme Motors — Assembly Plant 1',
-      organization_type: 'industrial_manufacturing',
-      industry: 'Automotive & Electric Powertrain',
-      location: 'Advanced Manufacturing Hub, Sector 4',
-      contact_email: 'operations@acmemotors.com',
-      status: 'active',
-      default_language: 'en',
-      supported_languages: ['en', 'es', 'ta', 'hi', 'de'],
-      accessibility_defaults: {
-        default_dwell_time_ms: 500,
-        high_contrast_default: false,
-        min_target_size_px: 48,
-        voice_confirmation_default: false,
-      },
-    };
+    return await this.request('/organizations/manage/profile');
   }
 
   async updateOrgProfile(payload: any): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/profile`, {
-        method: 'PUT',
-        headers: this.getHeaders(),
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return { message: 'Organization profile updated.' };
+    return await this.request('/organizations/manage/profile', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
   }
 
   async getOrgDepartments(): Promise<any[]> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/departments`, { headers: this.getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.length > 0) return data;
-      }
-    } catch (err) {
-      console.warn('[AMAP Enterprise Org] Departments fetch fallback:', err);
-    }
-    return [
-      {
-        id: '11111111-1111-1111-1111-111111111111',
-        name: 'Powertrain & Gearbox Integration',
-        status: 'active',
-        supervisor_count: 1,
-        worker_count: 3,
-        active_tasks_count: 2,
-      },
-      {
-        id: '22222222-2222-2222-2222-222222222222',
-        name: 'Chassis & Structural Welding',
-        status: 'active',
-        supervisor_count: 1,
-        worker_count: 1,
-        active_tasks_count: 0,
-      },
-      {
-        id: '33333333-3333-3333-3333-333333333333',
-        name: 'Quality Control & Diagnostics',
-        status: 'active',
-        supervisor_count: 1,
-        worker_count: 1,
-        active_tasks_count: 1,
-      },
-    ];
+    return await this.request<any[]>('/organizations/manage/departments');
   }
 
   async createOrgDepartment(payload: { name: string; status?: string }): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/departments`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return { id: 'dept-' + Date.now(), ...payload, supervisor_count: 0, worker_count: 0, active_tasks_count: 0 };
+    return await this.request('/organizations/manage/departments', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   async updateOrgDepartment(deptId: string, payload: any): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/departments/${deptId}`, {
-        method: 'PUT',
-        headers: this.getHeaders(),
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return { id: deptId, ...payload };
+    return await this.request(`/organizations/manage/departments/${deptId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
   }
 
   async deactivateOrgDepartment(deptId: string): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/departments/${deptId}`, {
-        method: 'DELETE',
-        headers: this.getHeaders(),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return { message: 'Department deactivated.' };
+    return await this.request(`/organizations/manage/departments/${deptId}`, {
+      method: 'DELETE',
+    });
   }
 
   async getOrgSupervisors(): Promise<any[]> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/supervisors`, { headers: this.getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.length > 0) return data;
-      }
-    } catch (err) {
-      console.warn('[AMAP Enterprise Org] Supervisors fetch fallback:', err);
-    }
-    return [
-      {
-        user_id: 'c0000000-0000-0000-0000-000000000002',
-        full_name: 'Marcus Vance',
-        email: 'supervisor@amap.com',
-        department_name: 'Powertrain & Gearbox Integration',
-        status: 'active',
-        assigned_workers_count: 3,
-        created_at: new Date(Date.now() - 30 * 86400000).toISOString(),
-      },
-      {
-        user_id: 'c0000000-0000-0000-0000-000000000099',
-        full_name: 'Elena Rostova',
-        email: 'elena.rostova@amap.com',
-        department_name: 'Quality Control & Diagnostics',
-        status: 'active',
-        assigned_workers_count: 2,
-        created_at: new Date(Date.now() - 10 * 86400000).toISOString(),
-      },
-    ];
+    return await this.request<any[]>('/organizations/manage/supervisors');
   }
 
-  async inviteOrgSupervisor(payload: { email: string; full_name: string; department_id?: string }): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/supervisors/invite`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return { user_id: 'sup-' + Date.now(), ...payload, status: 'invited', assigned_workers_count: 0 };
+  async inviteOrgSupervisor(payload: {
+    email: string;
+    full_name: string;
+    department_id?: string;
+  }): Promise<any> {
+    return await this.request('/organizations/manage/supervisors/invite', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
-  async getOrgWorkers(params?: { page?: number; page_size?: number; status?: string; department_id?: string }): Promise<any> {
-    try {
-      const q = new URLSearchParams();
-      if (params?.page) q.append('page', params.page.toString());
-      if (params?.page_size) q.append('page_size', params.page_size.toString());
-      if (params?.status) q.append('status', params.status);
-      if (params?.department_id) q.append('department_id', params.department_id);
-
-      const res = await fetch(`${API_BASE}/organizations/manage/workers?${q.toString()}`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch (err) {
-      console.warn('[AMAP Enterprise Org] Workers fetch fallback:', err);
-    }
-    return {
-      items: [
-        {
-          worker_profile_id: 'd0000000-0000-0000-0000-000000000001',
-          full_name: 'Alex Morgan',
-          email: 'alex.worker@amap.com',
-          badge_number: 'WRK-1048',
-          department_name: 'Powertrain & Gearbox Integration',
-          supervisor_name: 'Marcus Vance',
-          status: 'WORKING',
-          interaction_mode: 'multimodal',
-          training_completed: true,
-          current_task_name: 'Inverter Sub-Assembly Alpha',
-        },
-        {
-          worker_profile_id: 'd0000000-0000-0000-0000-000000000002',
-          full_name: 'Jordan Lee',
-          email: 'jordan.worker@amap.com',
-          badge_number: 'WRK-1049',
-          department_name: 'Chassis & Structural Welding',
-          supervisor_name: 'Marcus Vance',
-          status: 'READY',
-          interaction_mode: 'gesture',
-          training_completed: true,
-          current_task_name: null,
-        },
-        {
-          worker_profile_id: 'd0000000-0000-0000-0000-000000000003',
-          full_name: 'Samira Chen',
-          email: 'samira.chen@amap.com',
-          badge_number: 'WRK-1052',
-          department_name: 'Quality Control & Diagnostics',
-          supervisor_name: 'Elena Rostova',
-          status: 'ASSISTANCE_REQUESTED',
-          interaction_mode: 'voice',
-          training_completed: true,
-          current_task_name: 'High-Voltage Isolation Check',
-        },
-        {
-          worker_profile_id: 'd0000000-0000-0000-0000-000000000004',
-          full_name: 'Kenji Sato',
-          email: 'kenji.sato@amap.com',
-          badge_number: 'WRK-1055',
-          department_name: 'Powertrain & Gearbox Integration',
-          supervisor_name: 'Marcus Vance',
-          status: 'WORKING',
-          interaction_mode: 'multimodal',
-          training_completed: true,
-          current_task_name: 'Planetary Gearbox Assembly',
-        },
-        {
-          worker_profile_id: 'd0000000-0000-0000-0000-000000000005',
-          full_name: 'Maria Rodriguez',
-          email: 'maria.newhire@amap.com',
-          badge_number: 'WRK-1060',
-          department_name: 'Powertrain & Gearbox Integration',
-          supervisor_name: 'Marcus Vance',
-          status: 'ONBOARDING',
-          interaction_mode: 'multimodal',
-          training_completed: false,
-          current_task_name: null,
-        },
-      ],
-      total_count: 5,
-      page: 1,
-      page_size: 25,
-    };
+  async getOrgWorkers(params?: {
+    page?: number;
+    page_size?: number;
+    status?: string;
+    department_id?: string;
+  }): Promise<any> {
+    const q = new URLSearchParams();
+    if (params?.page) q.append('page', params.page.toString());
+    if (params?.page_size) q.append('page_size', params.page_size.toString());
+    if (params?.status) q.append('status', params.status);
+    if (params?.department_id) q.append('department_id', params.department_id);
+    const qs = q.toString();
+    return await this.request(`/organizations/manage/workers${qs ? `?${qs}` : ''}`);
   }
 
-  async inviteOrgWorker(payload: { email: string; full_name: string; badge_number?: string; department_id?: string; preferred_modality?: string }): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/workers/invite`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return {
-      worker_profile_id: 'wrk-' + Date.now(),
-      ...payload,
-      status: 'INVITED',
-      training_completed: false,
-      department_name: 'Unassigned',
-      supervisor_name: 'Unassigned',
-    };
+  async inviteOrgWorker(payload: {
+    email: string;
+    full_name: string;
+    badge_number?: string;
+    department_id?: string;
+    preferred_modality?: string;
+  }): Promise<any> {
+    return await this.request('/organizations/manage/workers/invite', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   async getOrgWorkflows(): Promise<any[]> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/workflows`, { headers: this.getHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.length > 0) return data;
-      }
-    } catch (err) {
-      console.warn('[AMAP Enterprise Org] Workflows fetch fallback:', err);
-    }
-    return [
-      {
-        id: 'e0000000-0000-0000-0000-000000000001',
-        name: 'Inverter Sub-Assembly Alpha',
-        description: 'Precision power electronics mounting, busbar sequence, and high-voltage isolation QA.',
-        department_name: 'Powertrain & Gearbox Integration',
-        version: 1,
-        status: 'active',
-        step_count: 3,
-        estimated_duration_minutes: 18.5,
-        steps: [
-          { step_number: 1, title: 'Optical Component Inspection', instruction: 'Verify thermal paste application and capacitor polarity.', is_safety_critical: false },
-          { step_number: 2, title: 'Primary Busbar Torquing', instruction: 'Align copper busbar and torque M6 fasteners to 9.2 Nm.', is_safety_critical: false },
-          { step_number: 3, title: 'High Voltage Isolation Check', instruction: 'Connect dielectric probe and engage automated 500V test.', is_safety_critical: true },
-        ],
-      },
-      {
-        id: 'e0000000-0000-0000-0000-000000000002',
-        name: 'High-Voltage Isolation Check',
-        description: 'Dielectric insulation resistance check and automated ground bonding verification.',
-        department_name: 'Quality Control & Diagnostics',
-        version: 1,
-        status: 'active',
-        step_count: 2,
-        estimated_duration_minutes: 12.0,
-        steps: [
-          { step_number: 1, title: 'Ground Bond Verification', instruction: 'Attach 25A ground probe to structural ground lug.', is_safety_critical: true },
-          { step_number: 2, title: 'Dielectric Safety Probe', instruction: 'Execute 1000V DC hipot isolation check.', is_safety_critical: true },
-        ],
-      },
-      {
-        id: 'e0000000-0000-0000-0000-000000000003',
-        name: 'Planetary Gearbox Assembly',
-        description: 'High-torque reduction gear calibration and planetary bearing seat sequence.',
-        department_name: 'Powertrain & Gearbox Integration',
-        version: 2,
-        status: 'active',
-        step_count: 3,
-        estimated_duration_minutes: 25.0,
-        steps: [
-          { step_number: 1, title: 'Alignment Pin Check', instruction: 'Insert hardened alignment pins into carrier housing.', is_safety_critical: false },
-          { step_number: 2, title: 'Sun Gear Torquing', instruction: 'Torque central sun gear to 45.0 Nm.', is_safety_critical: false },
-          { step_number: 3, title: 'Backlash Dial Gauge QA', instruction: 'Measure gear lash within 0.05mm tolerance.', is_safety_critical: true },
-        ],
-      },
-    ];
+    return await this.request<any[]>('/organizations/manage/workflows');
   }
 
   async createOrgWorkflow(payload: any): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/workflows`, {
-        method: 'POST',
-        headers: this.getHeaders(),
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return await res.json();
-    } catch {
-      // fallback
-    }
-    return { id: 'wf-' + Date.now(), ...payload, version: 1, status: 'active', step_count: payload.steps?.length || 0 };
+    return await this.request('/organizations/manage/workflows', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
   }
 
   async getOrgAssistanceOverview(): Promise<any[]> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/assistance`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch (err) {
-      console.warn('[AMAP Enterprise Org] Assistance fetch fallback:', err);
-    }
-    return [
-      {
-        id: '70000000-0000-0000-0000-000000000001',
-        worker_name: 'Samira Chen',
-        department_name: 'Quality Control & Diagnostics',
-        supervisor_name: 'Marcus Vance',
-        task_name: 'High-Voltage Isolation Check',
-        priority: 'high',
-        reason: 'Dielectric probe calibration error on step 3.',
-        status: 'open',
-        requested_at: '12 mins ago',
-      },
-    ];
+    return await this.request<any[]>('/organizations/manage/assistance');
   }
 
   async getOrgEmergencyEvents(): Promise<any[]> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/emergencies`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch (err) {
-      console.warn('[AMAP Enterprise Org] Emergency fetch fallback:', err);
-    }
-    return [];
+    return await this.request<any[]>('/organizations/manage/emergencies');
   }
 
   async getOrgAnalytics(): Promise<any> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/analytics`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch (err) {
-      console.warn('[AMAP Enterprise Org] Analytics fetch fallback:', err);
-    }
-    return {
-      total_workers: 5,
-      active_workers: 4,
-      tasks_completed_count: 19,
-      tasks_in_progress_count: 3,
-      average_task_duration_minutes: 8.2,
-      workflow_completion_rate: 94.5,
-      total_assistance_requests: 6,
-      average_resolution_time_minutes: 1.5,
-      emergency_stops_count: 0,
-      gesture_ready_workers_count: 4,
-      voice_ready_workers_count: 3,
-      multimodal_ready_workers_count: 3,
-      workers_needing_training_count: 1,
-    };
+    return await this.request('/organizations/manage/analytics');
   }
 
   async getOrgAudit(limit: number = 50): Promise<any[]> {
-    try {
-      const res = await fetch(`${API_BASE}/organizations/manage/audit?limit=${limit}`, { headers: this.getHeaders() });
-      if (res.ok) return await res.json();
-    } catch (err) {
-      console.warn('[AMAP Enterprise Org] Audit fetch fallback:', err);
-    }
-    return [
-      {
-        id: 'aud-001',
-        actor_name: 'Sarah Jenkins (Admin)',
-        actor_role: 'admin',
-        event_type: 'department.created',
-        resource_type: 'department',
-        occurred_at: '10 mins ago',
-        event_data: { name: 'Powertrain & Gearbox Integration' },
-      },
-      {
-        id: 'aud-002',
-        actor_name: 'Sarah Jenkins (Admin)',
-        actor_role: 'admin',
-        event_type: 'supervisor.invited',
-        resource_type: 'user',
-        occurred_at: '25 mins ago',
-        event_data: { email: 'supervisor@amap.com', full_name: 'Marcus Vance' },
-      },
-      {
-        id: 'aud-003',
-        actor_name: 'Sarah Jenkins (Admin)',
-        actor_role: 'admin',
-        event_type: 'worker.invited',
-        resource_type: 'worker_profile',
-        occurred_at: '45 mins ago',
-        event_data: { email: 'maria.newhire@amap.com', full_name: 'Maria Rodriguez' },
-      },
-    ];
+    return await this.request<any[]>(`/organizations/manage/audit?limit=${limit}`);
   }
 
   async getAuditLogs(limit: number = 50): Promise<any[]> {

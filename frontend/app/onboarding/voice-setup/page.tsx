@@ -2,10 +2,10 @@
 
 /**
  * Worker Voice Setup & Calibration Studio (/onboarding/voice-setup)
- * Restored Stable Single-Instance Speech Recognition Engine (Phases 2, 3, 4, 5, 8)
+ * Local faster-whisper push-to-talk voice calibration flow.
  * 
  * Invariant Guarantees:
- * 1. Single stable recognition instance with resilient auto-restart on boundary silence.
+ * 1. Push-to-talk recording with automatic silence detection.
  * 2. Processes final speech transcript events without interim substring race conditions.
  * 3. Step-by-step factory intent calibration: CONFIRM -> NEXT_STEP -> ASSISTANCE -> EMERGENCY_STOP.
  * 4. Comprehensive telemetry timestamps (T0 to T4) logging actual end-to-end latency.
@@ -17,6 +17,7 @@ import { useRouter } from 'next/navigation';
 import { useAccessibility } from '@/shared/theme/AccessibilityContext';
 import { t, SupportedLanguage } from '@/shared/i18n/languages';
 import { api } from '@/shared/api/client';
+import { useVoiceRecorder, TranscriptionResult, VoiceRecorderState } from '@/shared/hooks/useVoiceRecorder';
 
 type MicState =
   | 'MICROPHONE_PERMISSION_REQUIRED'
@@ -71,15 +72,13 @@ const TRAINING_STEPS_BY_LANG: Record<SupportedLanguage, TrainingStep[]> = {
 export default function VoiceSetupPage() {
   const router = useRouter();
   const { language, setHasCompletedVoiceSetup, announce, playAudioCue } = useAccessibility();
+  const sttLanguage = language === 'hi' ? 'hi' : 'en';
 
-  // Microphone Permission & Stream State
+  // Microphone Permission State
   const [micState, setMicState] = useState<MicState>('MICROPHONE_PERMISSION_REQUIRED');
   const [micErrorMessage, setMicErrorMessage] = useState<string>('');
-  const [volumeLevel, setVolumeLevel] = useState<number>(0);
-  const [audioStream, setAudioStream] = useState<MediaStream | null>(null);
 
-  // Speech Recognition State
-  const [isListening, setIsListening] = useState<boolean>(false);
+  // Push-to-talk state
   const [currentStepIndex, setCurrentStepIndex] = useState<number>(0);
   const [trainingSteps, setTrainingSteps] = useState<TrainingStep[]>(
     TRAINING_STEPS_BY_LANG[language] || TRAINING_STEPS_BY_LANG.en
@@ -94,10 +93,6 @@ export default function VoiceSetupPage() {
   const [processingLatencyMs, setProcessingLatencyMs] = useState<number>(0);
 
   // Stable References (Prevent recreation during re-renders)
-  const recognitionRef = useRef<any>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const isListeningRef = useRef<boolean>(false);
   const currentStepIndexRef = useRef<number>(0);
   const lastProcessedTimeRef = useRef<number>(0);
 
@@ -111,9 +106,9 @@ export default function VoiceSetupPage() {
     setTrainingSteps(TRAINING_STEPS_BY_LANG[language] || TRAINING_STEPS_BY_LANG.en);
   }, [language]);
 
-  // Handle Speech Result with Diagnostic Timestamps (Phase 4)
+  // Handle a backend transcript with diagnostic timestamps.
   const handleRecognizedTranscript = useCallback(
-    async (spokenText: string, rawConfidence: number, recognitionLang: string) => {
+    async (result: TranscriptionResult) => {
       const t0 = performance.now();
       const now = Date.now();
 
@@ -123,14 +118,15 @@ export default function VoiceSetupPage() {
       }
       lastProcessedTimeRef.current = now;
 
+      const spokenText = result.transcript.trim();
       setRawTranscript(spokenText);
 
       try {
         const tApiStart = performance.now();
-        const result = await api.processVoiceCommand({
+        const commandResult = await api.processVoiceCommand({
           raw_transcript: spokenText,
-          confidence: rawConfidence,
-          language: recognitionLang,
+          confidence: result.confidence,
+          language: result.detected_language,
         });
         const tApiEnd = performance.now();
         const apiDuration = Math.round(tApiEnd - tApiStart);
@@ -139,18 +135,18 @@ export default function VoiceSetupPage() {
         setProcessingLatencyMs(totalDuration);
         console.log(`[AMAP Voice] Spoken: "${spokenText}" | API Match: ${apiDuration}ms | Total Latency: ${totalDuration}ms`);
 
-        setConfidenceScore(result.confidence);
+        setConfidenceScore(commandResult.confidence);
 
-        if (result.validation_status === 'valid' && result.action_mapping) {
-          setMatchedCommand(result.matched_command || 'NONE');
-          setMatchedIntent(result.action_mapping.toUpperCase());
-          setFeedbackMessage(`✓ Recognized: "${spokenText}" (${result.action_mapping})`);
+        if (commandResult.validation_status === 'valid' && commandResult.action_mapping) {
+          setMatchedCommand(commandResult.matched_command || 'NONE');
+          setMatchedIntent(commandResult.action_mapping.toUpperCase());
+          setFeedbackMessage(`✓ Recognized: "${spokenText}" (${commandResult.action_mapping})`);
 
           // Match against current step using ref to avoid closure staleness
           const stepIdx = currentStepIndexRef.current;
           setTrainingSteps((prevSteps) => {
             const currentStep = prevSteps[stepIdx];
-            if (currentStep && result.action_mapping === currentStep.expectedAction) {
+            if (currentStep && commandResult.action_mapping === currentStep.expectedAction) {
               playAudioCue('confirm');
               announce(`Command verified: "${spokenText}"!`);
               const updated = [...prevSteps];
@@ -173,7 +169,7 @@ export default function VoiceSetupPage() {
         console.error('[AMAP Voice Error] Processing error details:', {
           message: err?.message,
           spokenText,
-          language: recognitionLang,
+          language: result.detected_language,
         });
         setFeedbackMessage(`⚠️ Voice command evaluation error: ${err?.message || 'Connection error'}`);
       }
@@ -181,178 +177,40 @@ export default function VoiceSetupPage() {
     [announce, playAudioCue]
   );
 
-  const handleTranscriptRef = useRef(handleRecognizedTranscript);
-  useEffect(() => {
-    handleTranscriptRef.current = handleRecognizedTranscript;
+  const handleRecorderState = useCallback((state: VoiceRecorderState) => {
+    if (state === 'REQUESTING_MIC') setMicState('MICROPHONE_REQUESTING');
+    else if (state === 'READY') setMicState('MICROPHONE_READY');
+    else if (state === 'ERROR') setMicState('MICROPHONE_ERROR');
+  }, []);
+
+  const recorder = useVoiceRecorder({
+    enabled: true,
+    autoRequestMic: false,
+    language: sttLanguage,
+    onTranscript: handleRecognizedTranscript,
+    onError: setMicErrorMessage,
+    onStateChange: handleRecorderState,
   });
 
-  // Initialize Speech Recognition Engine (Single Stable Instance)
-  const startSpeechRecognition = useCallback(() => {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+  const isListening = recorder.state === 'RECORDING';
+  const volumeLevel = recorder.volumeLevel;
 
-    if (!SpeechRecognition) {
-      setMicState('MICROPHONE_ERROR');
-      setMicErrorMessage('Web Speech API is not supported in this browser. Please use Google Chrome or Microsoft Edge.');
-      return;
-    }
-
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-    }
-
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = true;
-      recognition.interimResults = false;
-      recognition.maxAlternatives = 1;
-      recognition.lang =
-        language === 'es'
-          ? 'es-ES'
-          : language === 'ta'
-          ? 'ta-IN'
-          : language === 'hi'
-          ? 'hi-IN'
-          : language === 'de'
-          ? 'de-DE'
-          : 'en-US';
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        isListeningRef.current = true;
-      };
-
-      recognition.onresult = (event: any) => {
-        const lastIdx = event.results.length - 1;
-        const resultObj = event.results[lastIdx][0];
-        const spokenText = resultObj.transcript.trim();
-        const rawConfidence = resultObj.confidence || 0.92;
-
-        if (spokenText && handleTranscriptRef.current) {
-          handleTranscriptRef.current(spokenText, rawConfidence, recognition.lang);
-        }
-      };
-
-      recognition.onend = () => {
-        if (isListeningRef.current) {
-          setTimeout(() => {
-            if (isListeningRef.current && recognitionRef.current) {
-              try {
-                recognitionRef.current.start();
-              } catch (e) {
-                console.log('[AMAP Voice] Auto-restart active');
-              }
-            }
-          }, 150);
-        }
-      };
-
-      recognition.onerror = (event: any) => {
-        if (event.error !== 'no-speech') {
-          console.warn('Speech recognition status:', event.error);
-        }
-      };
-
-      recognition.start();
-      recognitionRef.current = recognition;
-      isListeningRef.current = true;
-      setIsListening(true);
-    } catch (err: any) {
-      console.error('Speech recognition startup error:', err);
-      setMicState('MICROPHONE_ERROR');
-      setMicErrorMessage('Failed to initialize speech recognition engine.');
-    }
-  }, [language]);
-
-  // Request Microphone Access
   const requestMicrophoneAccess = async () => {
     try {
       setMicState('MICROPHONE_REQUESTING');
       setMicErrorMessage('');
       announce('Requesting microphone access.');
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      setAudioStream(stream);
-
-      // Web Audio Analyser for Energy Monitor
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        const audioCtx = new AudioCtx();
-        audioContextRef.current = audioCtx;
-        const source = audioCtx.createMediaStreamSource(stream);
-        const analyser = audioCtx.createAnalyser();
-        analyser.fftSize = 64;
-        source.connect(analyser);
-        analyserRef.current = analyser;
-
-        const dataArray = new Uint8Array(analyser.frequencyBinCount);
-        const checkVolume = () => {
-          if (analyserRef.current) {
-            analyserRef.current.getByteFrequencyData(dataArray);
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-              sum += dataArray[i];
-            }
-            const avg = sum / dataArray.length;
-            setVolumeLevel(Math.min(100, Math.round((avg / 128) * 100)));
-            requestAnimationFrame(checkVolume);
-          }
-        };
-        requestAnimationFrame(checkVolume);
-      }
-
+      await recorder.requestMicrophone();
       setMicState('MICROPHONE_READY');
-      announce('Microphone ready! Starting voice recognition.');
-      startSpeechRecognition();
-    } catch (err: any) {
-      console.error('Microphone access error:', err);
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setMicState('MICROPHONE_DENIED');
-        setMicErrorMessage('Microphone access was denied. Please allow microphone permission in your browser address bar.');
-      } else {
-        setMicState('MICROPHONE_ERROR');
-        setMicErrorMessage(err.message || 'Microphone unavailable. Please connect a working microphone.');
-      }
+      announce('Microphone ready. Press Speak when you are ready to say the command.');
+    } catch (err) {
+      setMicState('MICROPHONE_DENIED');
+      setMicErrorMessage(err instanceof Error ? err.message : 'Microphone unavailable.');
     }
   };
 
-  const stopListening = () => {
-    isListeningRef.current = false;
-    setIsListening(false);
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
-    }
-  };
-
-  const restartListening = () => {
-    if (micState === 'MICROPHONE_READY') {
-      startSpeechRecognition();
-    } else {
-      requestMicrophoneAccess();
-    }
-  };
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      isListeningRef.current = false;
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {}
-      }
-      if (audioStream) {
-        audioStream.getTracks().forEach((t) => t.stop());
-      }
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-      }
-    };
-  }, [audioStream]);
+  const stopListening = () => recorder.stopRecording();
+  const restartListening = () => recorder.startRecording();
 
   const allCompleted = trainingSteps.every((s) => s.completed);
 
@@ -513,7 +371,7 @@ export default function VoiceSetupPage() {
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem' }}>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                Status: {isListening ? '🎤 Listening continuously for commands' : '⏸️ Voice recognition paused'}
+                Status: {isListening ? '🎤 Recording — speak your command' : recorder.state === 'PROCESSING' ? '⏳ Transcribing locally' : '⏸️ Ready for push-to-talk'}
               </span>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 {isListening ? (
@@ -529,10 +387,11 @@ export default function VoiceSetupPage() {
                   <button
                     type="button"
                     onClick={restartListening}
+                    disabled={recorder.state === 'PROCESSING'}
                     className="btn btn-primary"
                     style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem' }}
                   >
-                    ▶️ Resume Listening
+                    🎙️ Speak
                   </button>
                 )}
               </div>

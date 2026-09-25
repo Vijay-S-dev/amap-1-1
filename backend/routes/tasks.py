@@ -33,6 +33,11 @@ class TaskCompletionPayload(StrictInputModel):
     notes: Optional[str] = None
 
 
+class TaskCancelPayload(StrictInputModel):
+    """Payload for cancelling a task assignment."""
+    notes: Optional[str] = Field(default=None, max_length=1000)
+
+
 class StepExecutionPayload(StrictInputModel):
     """Payload for recording a workflow step execution."""
     status: str = Field(default="in_progress", pattern="^(in_progress|completed|failed|skipped)$")
@@ -103,8 +108,88 @@ def complete_task(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except UnauthorizedError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValidationError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post(
+    "/assignments/{assignment_id}/cancel",
+    response_model=Dict[str, Any],
+    status_code=status.HTTP_200_OK,
+    summary="Cancel a task assignment (SHOULD FIX #7)",
+)
+def cancel_task(
+    assignment_id: UUID,
+    payload: Optional[TaskCancelPayload] = None,
+    current_worker: AuthenticatedUserContext = Depends(get_current_active_worker),
+    service: TaskService = Depends(get_task_service),
+) -> Dict[str, Any]:
+    """Cancel an assigned or in-progress task assignment."""
+    try:
+        return service.cancel_task_assignment(
+            assignment_id=assignment_id,
+            worker_profile_id=current_worker.worker_profile_id,
+            notes=payload.notes if payload else None,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+
+@router.get(
+    "/assignments/{assignment_id}/result",
+    response_model=Dict[str, Any],
+    status_code=status.HTTP_200_OK,
+    summary="Get the recorded result for a task assignment (MUST FIX #2 / FR-09)",
+)
+def get_task_result(
+    assignment_id: UUID,
+    current_user: AuthenticatedUserContext = Depends(get_current_user),
+    service: TaskService = Depends(get_task_service),
+) -> Dict[str, Any]:
+    """Return the authoritative persisted result for a completed/cancelled assignment."""
+    is_supervisor = any(
+        r in (current_user.roles or []) for r in ("supervisor", "manager", "admin", "superadmin")
+    )
+    try:
+        return service.get_task_result(
+            assignment_id=assignment_id,
+            worker_profile_id=current_user.worker_profile_id,
+            organization_id=current_user.organization_id,
+            is_supervisor=is_supervisor,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@router.get(
+    "/{task_id}",
+    response_model=Dict[str, Any],
+    status_code=status.HTTP_200_OK,
+    summary="Get task details along with its ordered workflow steps",
+)
+def get_task_details(
+    task_id: UUID,
+    current_user: AuthenticatedUserContext = Depends(get_current_user),
+    service: TaskService = Depends(get_task_service),
+) -> Dict[str, Any]:
+    """Return task details and its workflow steps for the authenticated user, enforcing tenancy."""
+    try:
+        return service.get_task_details(
+            task_id=task_id,
+            organization_id=current_user.organization_id,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
 
 
 @router.get(
@@ -151,3 +236,5 @@ def execute_workflow_step(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     except UnauthorizedError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

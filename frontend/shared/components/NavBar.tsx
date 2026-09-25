@@ -69,8 +69,10 @@ export function NavBar() {
                 aria-current={isActive ? 'page' : undefined}
                 style={{
                   fontSize: '0.85rem',
-                  padding: '0.45rem 0.85rem',
-                  minHeight: '38px',
+                  padding: '0.5rem 0.95rem',
+                  minHeight: '48px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
                   background: isActive ? 'rgba(255, 255, 255, 0.15)' : 'transparent',
                   borderColor: isActive ? 'rgba(255, 255, 255, 0.3)' : 'transparent',
                   color: isActive ? link.color || '#fff' : 'var(--text-secondary)',
@@ -91,12 +93,13 @@ export function NavBar() {
             onChange={(e) => setLanguage(e.target.value as SupportedLanguage)}
             aria-label="Select Interface Language"
             style={{
-              padding: '0.4rem 0.6rem',
+              padding: '0.5rem 0.75rem',
+              minHeight: '48px',
               borderRadius: '8px',
               background: 'var(--surface-card)',
               color: 'white',
               border: '1px solid var(--surface-glass-border)',
-              fontSize: '0.8rem',
+              fontSize: '0.85rem',
               fontWeight: 600,
             }}
           >
@@ -114,7 +117,7 @@ export function NavBar() {
             className="btn btn-secondary"
             aria-pressed={highContrast}
             aria-label="Toggle High Contrast Mode"
-            style={{ fontSize: '0.8rem', padding: '0.4rem 0.75rem', minHeight: '36px' }}
+            style={{ fontSize: '0.85rem', padding: '0.5rem 1rem', minHeight: '48px', display: 'inline-flex', alignItems: 'center' }}
           >
             {highContrast ? '👁️ Standard' : '🔲 High Contrast'}
           </button>

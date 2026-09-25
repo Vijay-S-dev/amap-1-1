@@ -65,3 +65,21 @@ class VoiceCommandResult(AMAPBaseModel):
         description="Validation outcome: valid, low_confidence, or unmatched",
     )
     message: Optional[str] = None
+
+
+class TranscriptionResult(AMAPBaseModel):
+    """Result returned by the local faster-whisper transcription service."""
+
+    transcript: str = Field(default="", max_length=2000)
+    detected_language: str = Field(default="en", max_length=5)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    processing_time_ms: float = Field(default=0.0, ge=0.0)
+    success: bool = False
+
+
+class STTHealthStatus(AMAPBaseModel):
+    """Non-invasive health state for the lazy-loaded local STT model."""
+
+    model_status: str
+    model_name: str
+    supported_languages: list[str]

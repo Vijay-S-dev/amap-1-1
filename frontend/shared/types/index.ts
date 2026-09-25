@@ -53,23 +53,45 @@ export interface TaskDetails {
   steps: WorkflowStep[];
 }
 
-export interface MultimodalInput {
-  mode: InteractionMode;
-  rawIntent: string;
+export interface MultimodalInputItem {
+  mode: InteractionMode | string;
+  raw_intent: string;
   confidence: number;
-  timestampMs: number;
+  timestamp_ms: number;
+  context_data?: Record<string, any>;
+  // camelCase aliases
+  rawIntent?: string;
+  timestampMs?: number;
   contextData?: Record<string, any>;
 }
 
+export type MultimodalInput = MultimodalInputItem;
+
+export interface MultimodalFusionPayload {
+  inputs: MultimodalInputItem[];
+  temporal_window_ms?: number;
+  temporalWindowMs?: number;
+  work_session_id?: string | null;
+  client_context?: Record<string, any>;
+}
+
 export interface MultimodalFusionResult {
-  fusedAction: string | null;
-  fusedConfidence: number;
-  fusionStrategy: 'single_mode' | 'reinforcing' | 'complementary' | 'conflict_resolved' | 'conflict_ambiguous';
-  requiresConfirmation: boolean;
-  contributingModes: string[];
-  targetContext?: Record<string, any>;
-  validationStatus: 'valid' | 'rejected' | 'ambiguous';
+  fused_action: string | null;
+  fused_confidence: number;
+  fusion_strategy: string;
+  requires_confirmation: boolean;
+  contributing_modes: string[];
+  target_context?: Record<string, any>;
+  validation_status: 'valid' | 'rejected' | 'ambiguous' | string;
   message?: string;
+  // camelCase aliases
+  fusedAction?: string | null;
+  fusedConfidence?: number;
+  fusionStrategy?: string;
+  requiresConfirmation?: boolean;
+  contributingModes?: string[];
+  targetContext?: Record<string, any>;
+  validationStatus?: 'valid' | 'rejected' | 'ambiguous' | string;
 }
 
 export interface WorkerPersonalization {

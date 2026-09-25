@@ -190,3 +190,233 @@ def test_voice_process_command_api_endpoint():
 
     finally:
         app.dependency_overrides.clear()
+
+
+def test_voice_process_command_unauthenticated_rejected():
+    """
+    TASK 9 PROOF: POST /api/v1/voice/process-command must reject unauthenticated
+    requests with HTTP 401 or 403.
+    """
+    client = TestClient(app)
+    # Ensure no dependency override is present
+    app.dependency_overrides.clear()
+
+    resp = client.post(
+        "/api/v1/voice/process-command",
+        json={
+            "raw_transcript": "emergency stop",
+            "confidence": 0.95,
+            "language": "en-US",
+        },
+    )
+    # HTTPBearer returns 401 or 403 when unauthenticated
+    assert resp.status_code in (401, 403)
+
+
+# =====================================================================
+# Hinglish Vocabulary Tests (Step 3 & 8)
+# =====================================================================
+
+def test_voice_hinglish_vocabulary_matches():
+    service = VoiceService()
+
+    # next_step
+    cmd, act, _, _ = service.match_command("agla")
+    assert cmd == "next_step"
+    assert act == "next_step"
+
+    cmd, act, _, _ = service.match_command("aage")
+    assert cmd == "next_step"
+    assert act == "next_step"
+
+    # previous_step
+    cmd, act, _, _ = service.match_command("pichla")
+    assert cmd == "previous_step"
+    assert act == "previous_step"
+
+    cmd, act, _, _ = service.match_command("wapas")
+    assert cmd == "previous_step"
+    assert act == "previous_step"
+
+    # confirm_action
+    cmd, act, _, _ = service.match_command("pushti")
+    assert cmd == "confirm_action"
+    assert act == "confirm_action"
+
+    cmd, act, _, _ = service.match_command("haan")
+    assert cmd == "confirm_action"
+    assert act == "confirm_action"
+
+    cmd, act, _, _ = service.match_command("sahi")
+    assert cmd == "confirm_action"
+    assert act == "confirm_action"
+
+    # request_assistance
+    cmd, act, _, _ = service.match_command("madad")
+    assert cmd == "request_assistance"
+    assert act == "request_assistance"
+
+    cmd, act, _, _ = service.match_command("sahayata")
+    assert cmd == "request_assistance"
+    assert act == "request_assistance"
+
+    # emergency_stop
+    cmd, act, _, is_crit = service.match_command("roko")
+    assert cmd == "emergency_stop"
+    assert act == "emergency_stop"
+    assert is_crit is True
+
+    cmd, act, _, is_crit = service.match_command("ruko")
+    assert cmd == "emergency_stop"
+    assert act == "emergency_stop"
+    assert is_crit is True
+
+
+# =====================================================================
+# /voice/transcribe Endpoint Hardening Tests (Step 1 & 8)
+# =====================================================================
+
+def test_voice_transcribe_unauthenticated_rejected():
+    """POST /api/v1/voice/transcribe must reject unauthenticated requests with HTTP 401."""
+    client = TestClient(app)
+    app.dependency_overrides.clear()
+
+    resp = client.post(
+        "/api/v1/voice/transcribe",
+        files={"audio": ("audio.webm", b"fake-audio-content-under-100", "audio/webm")},
+    )
+    assert resp.status_code in (401, 403)
+
+
+def test_voice_transcribe_payload_too_large_rejected():
+    """POST /api/v1/voice/transcribe must reject payloads > 10MB with HTTP 413."""
+    client = TestClient(app)
+    mock_user = AuthenticatedUserContext(
+        user_id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        email="worker@amap.org",
+        full_name="Worker",
+        status="active",
+        roles=["worker"],
+        permissions=[],
+        worker_profile_id=uuid.uuid4(),
+    )
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+
+    try:
+        # Create a payload exceeding 10 MB (10 * 1024 * 1024 + 1 bytes)
+        oversized_data = b"0" * (10 * 1024 * 1024 + 1024)
+        resp = client.post(
+            "/api/v1/voice/transcribe",
+            files={"audio": ("large_audio.webm", oversized_data, "audio/webm")},
+        )
+        assert resp.status_code == 413
+        err_msg = resp.json().get("error") or resp.json().get("detail") or ""
+        assert "10MB" in err_msg
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_voice_transcribe_unsupported_language_rejected():
+    """POST /api/v1/voice/transcribe with language=de must return HTTP 422."""
+    client = TestClient(app)
+    mock_user = AuthenticatedUserContext(
+        user_id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        email="worker@amap.org",
+        full_name="Worker",
+        status="active",
+        roles=["worker"],
+        permissions=[],
+        worker_profile_id=uuid.uuid4(),
+    )
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+
+    try:
+        resp = client.post(
+            "/api/v1/voice/transcribe",
+            data={"language": "de"},
+            files={"audio": ("audio.webm", b"x" * 200, "audio/webm")},
+        )
+        assert resp.status_code == 422
+        err_msg = resp.json().get("error") or resp.json().get("detail") or ""
+        assert "Only English (en) and Hindi (hi) are supported" in err_msg
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_voice_transcribe_empty_or_small_audio_rejected():
+    """POST /api/v1/voice/transcribe with < 100 bytes must return HTTP 422."""
+    client = TestClient(app)
+    mock_user = AuthenticatedUserContext(
+        user_id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        email="worker@amap.org",
+        full_name="Worker",
+        status="active",
+        roles=["worker"],
+        permissions=[],
+        worker_profile_id=uuid.uuid4(),
+    )
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+
+    try:
+        resp = client.post(
+            "/api/v1/voice/transcribe",
+            files={"audio": ("audio.webm", b"too small", "audio/webm")},
+        )
+        assert resp.status_code == 422
+        err_msg = resp.json().get("error") or resp.json().get("detail") or ""
+        assert "too small" in err_msg.lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_voice_transcribe_mocked_success():
+    """POST /api/v1/voice/transcribe returns valid TranscriptionResult contract."""
+    client = TestClient(app)
+    mock_user = AuthenticatedUserContext(
+        user_id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        email="worker@amap.org",
+        full_name="Worker",
+        status="active",
+        roles=["worker"],
+        permissions=[],
+        worker_profile_id=uuid.uuid4(),
+    )
+    app.dependency_overrides[get_current_user] = lambda: mock_user
+
+    from models.voice import TranscriptionResult
+    from routes.voice import get_speech_to_text_service
+
+    class MockSTTService:
+        def validate_language(self, lang):
+            return "en"
+
+        def transcribe(self, audio_bytes, language=None, filename=None):
+            return TranscriptionResult(
+                transcript="next step",
+                detected_language="en",
+                confidence=0.92,
+                processing_time_ms=120.5,
+                success=True,
+            )
+
+    app.dependency_overrides[get_speech_to_text_service] = lambda: MockSTTService()
+
+    try:
+        resp = client.post(
+            "/api/v1/voice/transcribe",
+            data={"language": "en"},
+            files={"audio": ("audio.webm", b"x" * 500, "audio/webm")},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["transcript"] == "next step"
+        assert data["detected_language"] == "en"
+        assert data["confidence"] == 0.92
+        assert data["processing_time_ms"] == 120.5
+    finally:
+        app.dependency_overrides.clear()

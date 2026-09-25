@@ -86,6 +86,24 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     setHasCompletedTrainingState(localStorage.getItem('amap_ob_train') === 'true');
   }, []);
 
+  // Synchronize document.documentElement.lang safely from the client (WCAG 3.1.1)
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      const supportedLanguages: SupportedLanguage[] = ['en', 'es', 'ta', 'hi', 'de'];
+      const activeLang = supportedLanguages.includes(language) ? language : 'en';
+      document.documentElement.lang = activeLang;
+    }
+  }, [language]);
+
+  // Synchronize root body class with high contrast and reduced motion preferences
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.body.classList.toggle('high-contrast', highContrast);
+      document.body.classList.toggle('theme-high-contrast', highContrast);
+      document.body.classList.toggle('reduce-motion', reducedMotion);
+    }
+  }, [highContrast, reducedMotion]);
+
   const setLanguage = (lang: SupportedLanguage) => {
     setLanguageState(lang);
     if (typeof window !== 'undefined') localStorage.setItem('amap_lang', lang);

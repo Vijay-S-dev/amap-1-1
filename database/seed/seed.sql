@@ -61,61 +61,95 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- 7. User Roles Assignments
-INSERT INTO user_roles (organization_id, user_id, role_id)
+INSERT INTO user_roles (user_id, role_id)
 VALUES
-    ('9a61e05d-7a32-4112-9c17-1833d7b42f65', 'c0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001'),
-    ('9a61e05d-7a32-4112-9c17-1833d7b42f65', 'c0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000002'),
-    ('9a61e05d-7a32-4112-9c17-1833d7b42f65', 'c0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000003'),
-    ('9a61e05d-7a32-4112-9c17-1833d7b42f65', 'c0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000003')
+    ('c0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001'),
+    ('c0000000-0000-0000-0000-000000000002', 'a0000000-0000-0000-0000-000000000002'),
+    ('c0000000-0000-0000-0000-000000000003', 'a0000000-0000-0000-0000-000000000003'),
+    ('c0000000-0000-0000-0000-000000000004', 'a0000000-0000-0000-0000-000000000003')
 ON CONFLICT DO NOTHING;
 
 -- 8. Worker Profiles
-INSERT INTO worker_profiles (id, organization_id, user_id, badge_number, status)
+INSERT INTO worker_profiles (id, user_id)
 VALUES
-    ('d0000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'c0000000-0000-0000-0000-000000000003', 'WRK-1048', 'active'),
-    ('d0000000-0000-0000-0000-000000000002', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'c0000000-0000-0000-0000-000000000004', 'WRK-1049', 'active')
+    ('d0000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-000000000003'),
+    ('d0000000-0000-0000-0000-000000000002', 'c0000000-0000-0000-0000-000000000004')
 ON CONFLICT (id) DO NOTHING;
 
 -- 9. Worker Personalization & Capability Profiles
-INSERT INTO worker_capability_profiles (organization_id, worker_profile_id, preferred_modality, has_motor_tremor, has_speech_diversity)
+INSERT INTO worker_capability_profiles (worker_profile_id, capability_data, status)
 VALUES
-    ('9a61e05d-7a32-4112-9c17-1833d7b42f65', 'd0000000-0000-0000-0000-000000000001', 'multimodal', true, false),
-    ('9a61e05d-7a32-4112-9c17-1833d7b42f65', 'd0000000-0000-0000-0000-000000000002', 'gesture', false, true)
-ON CONFLICT DO NOTHING;
+    ('d0000000-0000-0000-0000-000000000001', '{"preferred_modality": "multimodal", "has_motor_tremor": true, "has_speech_diversity": false}'::jsonb, 'active'),
+    ('d0000000-0000-0000-0000-000000000002', '{"preferred_modality": "gesture", "has_motor_tremor": false, "has_speech_diversity": true}'::jsonb, 'active')
+ON CONFLICT (worker_profile_id) DO NOTHING;
 
-INSERT INTO worker_personalizations (organization_id, worker_profile_id, dwell_time_ms, hitbox_scaling_factor, voice_noise_gate_db, is_auto_adapted)
+INSERT INTO worker_personalizations (worker_profile_id, personalization_data, status)
 VALUES
-    ('9a61e05d-7a32-4112-9c17-1833d7b42f65', 'd0000000-0000-0000-0000-000000000001', 650, 1.25, 14.0, true),
-    ('9a61e05d-7a32-4112-9c17-1833d7b42f65', 'd0000000-0000-0000-0000-000000000002', 500, 1.00, 18.0, false)
-ON CONFLICT DO NOTHING;
+    ('d0000000-0000-0000-0000-000000000001', '{"dwell_time_ms": 650, "hitbox_scaling_factor": 1.25, "voice_noise_gate_db": 14.0, "is_auto_adapted": true}'::jsonb, 'active'),
+    ('d0000000-0000-0000-0000-000000000002', '{"dwell_time_ms": 500, "hitbox_scaling_factor": 1.00, "voice_noise_gate_db": 18.0, "is_auto_adapted": false}'::jsonb, 'active')
+ON CONFLICT (worker_profile_id) DO NOTHING;
 
 -- 10. Workflows & Assembly Steps
-INSERT INTO workflows (id, organization_id, name, description, version, status)
+INSERT INTO workflows (id, organization_id, name, description, status)
 VALUES
-    ('e0000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'Inverter Sub-Assembly Alpha', 'Precision power electronics mounting and high-voltage busbar torque sequence', 1, 'active')
+    ('e0000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'Inverter Sub-Assembly Alpha', 'Precision power electronics mounting and high-voltage busbar torque sequence', 'active')
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO workflow_steps (id, organization_id, workflow_id, step_order, title, instruction, is_safety_critical)
+INSERT INTO workflow_steps (id, workflow_id, step_order, name, description, status)
 VALUES
-    ('f0000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'e0000000-0000-0000-0000-000000000001', 1, 'Optical Component Inspection', 'Verify thermal paste application and capacitor polarity on PCB bed.', false),
-    ('f0000000-0000-0000-0000-000000000002', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'e0000000-0000-0000-0000-000000000001', 2, 'Primary Busbar Torquing', 'Align copper busbar and torque M6 fasteners to 9.2 Nm in star pattern.', false),
-    ('f0000000-0000-0000-0000-000000000003', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'e0000000-0000-0000-0000-000000000001', 3, 'High Voltage Isolation Check', 'Connect dielectric probe to safety terminal and engage automated 500V test.', true)
+    ('f0000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 1, 'Optical Component Inspection', 'Verify thermal paste application and capacitor polarity on PCB bed.', 'active'),
+    ('f0000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-000000000001', 2, 'Primary Busbar Torquing', 'Align copper busbar and torque M6 fasteners to 9.2 Nm in star pattern.', 'active'),
+    ('f0000000-0000-0000-0000-000000000003', 'e0000000-0000-0000-0000-000000000001', 3, 'High Voltage Isolation Check', 'Connect dielectric probe to safety terminal and engage automated 500V test.', 'active')
 ON CONFLICT (id) DO NOTHING;
 
 -- 11. Interaction Configurations
-INSERT INTO interaction_configurations (id, organization_id, name, default_dwell_time_ms, confidence_threshold, temporal_fusion_window_ms)
+INSERT INTO interaction_configurations (id, organization_id, name, description, status)
 VALUES
-    ('80000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'Powertrain High-Noise Preset', 600, 0.60, 1500),
-    ('80000000-0000-0000-0000-000000000002', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'Motor Diversity Enhanced Dwell Preset', 750, 0.55, 2000)
+    ('80000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'Powertrain High-Noise Preset', 'Default configuration for noisy industrial floors', 'active'),
+    ('80000000-0000-0000-0000-000000000002', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'Motor Diversity Enhanced Dwell Preset', 'Configuration with extended dwell times for motor accessibility', 'active')
 ON CONFLICT (id) DO NOTHING;
 
 -- 12. Active Work Session & Open Assistance Ticket
-INSERT INTO work_sessions (id, organization_id, worker_profile_id, status, started_at)
+INSERT INTO work_sessions (id, worker_profile_id, status, started_at)
 VALUES
-    ('90000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'd0000000-0000-0000-0000-000000000001', 'active', CURRENT_TIMESTAMP)
+    ('90000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', 'active', CURRENT_TIMESTAMP)
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO assistance_requests (id, organization_id, worker_profile_id, status, urgency, reason, created_at)
+INSERT INTO assistance_requests (id, organization_id, worker_profile_id, status, priority, reason)
 VALUES
-    ('70000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'd0000000-0000-0000-0000-000000000001', 'open', 'high', 'Dielectric probe calibration error on step 3.', CURRENT_TIMESTAMP)
+    ('70000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'd0000000-0000-0000-0000-000000000001', 'open', 'high', 'Dielectric probe calibration error on step 3.')
+ON CONFLICT (id) DO NOTHING;
+
+-- 13. Canonical Actions
+INSERT INTO actions (id, name, display_name, description, category, status)
+VALUES
+    ('40000000-0000-0000-0000-000000000001', 'next_step', 'Next Step', 'Advance to the next workflow step', 'workflow', 'active'),
+    ('40000000-0000-0000-0000-000000000002', 'confirm_action', 'Confirm Step Action', 'Confirm and complete current step action', 'workflow', 'active'),
+    ('40000000-0000-0000-0000-000000000003', 'previous_step', 'Previous Step', 'Navigate back to the previous workflow step', 'navigation', 'active'),
+    ('40000000-0000-0000-0000-000000000004', 'pause_session', 'Pause Work Session', 'Temporarily pause active workstation assembly', 'system', 'active'),
+    ('40000000-0000-0000-0000-000000000005', 'resume_session', 'Resume Work Session', 'Resume paused workstation assembly', 'system', 'active'),
+    ('40000000-0000-0000-0000-000000000006', 'emergency_stop', 'Emergency Stop', 'Software safety stop interlock and supervisor dispatch', 'system', 'active'),
+    ('40000000-0000-0000-0000-000000000007', 'request_assistance', 'Request Assistance', 'Request floor supervisor assistance ticket', 'assistance', 'active')
+ON CONFLICT (name) DO NOTHING;
+
+-- 14. Assembly Task & Workflow Link
+INSERT INTO tasks (id, organization_id, name, description, status)
+VALUES
+    ('50000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'Inverter Alpha Assembly', 'Power inverter electronics mounting and busbar torque sequence', 'active')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO task_workflows (task_id, workflow_id)
+VALUES
+    ('50000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001')
+ON CONFLICT (task_id, workflow_id) DO NOTHING;
+
+-- 15. Initial Worker Task Assignment & Workflow Assignment
+INSERT INTO worker_task_assignments (id, task_id, worker_profile_id, status)
+VALUES
+    ('61000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', 'assigned')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO workflow_assignments (id, workflow_id, worker_profile_id, status)
+VALUES
+    ('60000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', 'assigned')
 ON CONFLICT (id) DO NOTHING;

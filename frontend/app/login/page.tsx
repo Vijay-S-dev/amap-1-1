@@ -8,13 +8,12 @@
  */
 
 import React, { Suspense, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useAccessibility } from '@/shared/theme/AccessibilityContext';
 import { t } from '@/shared/i18n/languages';
 import { api } from '@/shared/api/client';
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTarget = searchParams.get('redirect');
 
@@ -82,61 +81,48 @@ function LoginForm() {
     setErrorMessage('');
 
     try {
-      let accessToken = 'demo_token_' + Date.now();
-      try {
-        const res = await fetch('http://localhost:8000/api/v1/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            organization_id: organizationId,
-            email: email.trim(),
-            password,
-          }),
-        });
+      // 1. Authenticate with backend API (real authentication, no localhost hardcoding, no fake token)
+      const authResult = await api.login({
+        organization_id: organizationId,
+        email: email.trim(),
+        password,
+      });
 
-        if (res.ok) {
-          const data = await res.json();
-          accessToken = data.access_token;
-        }
-      } catch {
-        // Dev demo token fallback
-      }
+      const accessToken = authResult.access_token;
 
-      api.setAuth(accessToken, organizationId);
-
-      // Set auth cookie for edge middleware
+      // 2. Set auth cookie for edge middleware route gating
       if (typeof document !== 'undefined') {
         document.cookie = `amap_token=${accessToken}; path=/; max-age=86400; SameSite=Lax`;
       }
 
       playAudioCue('confirm');
 
-      // Admin & Supervisor Role Dispatch
-      if (email.includes('admin')) {
+      // 3. Obtain authoritative user context from backend /auth/me
+      const me = await api.getMe();
+      const roles = me.roles || [];
+
+      // 4. Role Dispatch based on authoritative backend roles
+      // Use window.location.href to bypass stale Next.js Router Cache prefetch redirects
+      if (roles.includes('admin') || roles.includes('organization_admin')) {
         announce('Welcome Administrator. Entering Configuration Studio.');
-        router.push(redirectTarget || '/admin');
+        const target = (redirectTarget && redirectTarget.startsWith('/admin')) ? redirectTarget : '/admin';
+        window.location.href = target;
         return;
       }
 
-      if (email.includes('supervisor')) {
+      if (roles.includes('supervisor')) {
         announce('Welcome Supervisor. Entering Fleet Operations.');
-        router.push(redirectTarget || '/organization');
+        const target = (redirectTarget && (redirectTarget.startsWith('/organization') || redirectTarget.startsWith('/organisation'))) ? redirectTarget : '/organization';
+        window.location.href = target;
         return;
       }
 
-      // Worker Lifecycle Discrimination: Fresher vs. Existing Employee (§ 12, § 38)
-      // Query readiness endpoint
-      const workerProfileId = email.includes('maria')
-        ? 'd0000000-0000-0000-0000-000000000002'
-        : 'd0000000-0000-0000-0000-000000000001';
+      // 5. Worker Lifecycle: Fresher vs. Existing Employee based on real worker profile
+      const workerProfileId = me.workerProfileId;
 
-      try {
-        const readinessRes = await fetch(`http://localhost:8000/api/v1/workers/${workerProfileId}/readiness`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-
-        if (readinessRes.ok) {
-          const readiness = await readinessRes.json();
+      if (workerProfileId) {
+        try {
+          const readiness = await api.getWorkerReadiness(workerProfileId);
 
           if (readiness.is_fresher || !readiness.onboarding_completed) {
             // Fresher Flow (§ 12)
@@ -147,7 +133,7 @@ function LoginForm() {
             setHasCompletedTraining(false);
 
             announce('Welcome to AMAP! Starting first-time worker onboarding.');
-            router.push('/onboarding/language');
+            window.location.href = '/onboarding/language';
             return;
           } else {
             // Existing Employee Flow (§ 38)
@@ -166,25 +152,22 @@ function LoginForm() {
               }
             }
 
-            announce('Welcome back Alex Morgan! Restoring active workstation.');
-            router.push(redirectTarget || '/worker');
+            announce(`Welcome back ${me.fullName || 'Worker'}! Restoring active workstation.`);
+            const target = (redirectTarget && (redirectTarget.startsWith('/worker') || redirectTarget.startsWith('/training'))) ? redirectTarget : '/worker';
+            window.location.href = target;
             return;
           }
+        } catch {
+          // If readiness check fails, route to worker safely
         }
-      } catch {
-        // Fallback heuristic based on email
       }
 
-      // Default Fresher routing if Maria, else existing
-      if (email.includes('maria') || email.includes('fresher') || email.includes('new')) {
-        announce('Starting first-time onboarding for new hire.');
-        router.push('/onboarding/language');
-      } else {
-        announce('Certified worker verified. Entering production workstation.');
-        router.push(redirectTarget || '/worker');
-      }
+      // Default worker routing
+      announce('Entering production workstation.');
+      const defaultTarget = (redirectTarget && (redirectTarget.startsWith('/worker') || redirectTarget.startsWith('/training'))) ? redirectTarget : '/worker';
+      window.location.href = defaultTarget;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Login failed. Please retry.';
+      const msg = err instanceof Error ? err.message : 'Login failed. Please verify credentials.';
       setErrorMessage(msg);
       announce(`Login error: ${msg}`);
       playAudioCue('alert');
@@ -282,7 +265,6 @@ function LoginForm() {
                 background: 'var(--surface-card)',
                 color: '#fff',
                 border: '2px solid var(--surface-glass-border)',
-                outline: 'none',
               }}
             />
           </div>
@@ -309,7 +291,6 @@ function LoginForm() {
                 background: 'var(--surface-card)',
                 color: '#fff',
                 border: '2px solid var(--surface-glass-border)',
-                outline: 'none',
               }}
             />
           </div>

@@ -104,17 +104,38 @@ export function WorkflowStepViewer({
             </span>
           </div>
         )}
+
+        {/* Supplementary Step Input Hint (FR-01 / Phase 6) */}
+        <div
+          style={{
+            marginTop: '1rem',
+            padding: '0.65rem 1rem',
+            background: 'rgba(0, 242, 254, 0.06)',
+            border: '1px solid rgba(0, 242, 254, 0.25)',
+            borderRadius: '8px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            fontSize: '0.9rem',
+            color: 'var(--text-primary)',
+          }}
+        >
+          <span>💡</span>
+          <span>
+            <strong>Input Hint:</strong> Point 👉 to advance or say &quot;Next&quot; / &quot;Confirm&quot;.
+          </span>
+        </div>
       </div>
 
       {/* Accessible Action Control Bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={onPreviousStep}
             disabled={currentStepIndex === 0}
             className="btn btn-secondary"
-            style={{ opacity: currentStepIndex === 0 ? 0.5 : 1 }}
+            style={{ minHeight: '48px', opacity: currentStepIndex === 0 ? 0.5 : 1 }}
           >
             ← Previous Step
           </button>
@@ -122,17 +143,18 @@ export function WorkflowStepViewer({
             type="button"
             onClick={onNextStep}
             className="btn btn-primary"
+            style={{ minHeight: '48px', fontWeight: 700 }}
           >
             Confirm & Next Step →
           </button>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
           <button
             type="button"
             onClick={onRequestAssistance}
             className="btn btn-secondary"
-            style={{ borderColor: 'rgba(245, 158, 11, 0.4)', color: 'var(--accent-amber)' }}
+            style={{ minHeight: '48px', borderColor: 'rgba(245, 158, 11, 0.4)', color: 'var(--accent-amber)' }}
           >
             🙋 Request Assistance
           </button>
@@ -140,6 +162,7 @@ export function WorkflowStepViewer({
             type="button"
             onClick={onEmergencyStop}
             className="btn btn-danger"
+            style={{ minHeight: '48px', minWidth: '160px', fontWeight: 800 }}
           >
             🛑 Emergency Stop
           </button>

@@ -153,6 +153,8 @@ from models.gesture import (
     GestureRecognitionResult,
 )
 from models.voice import (
+    STTHealthStatus,
+    TranscriptionResult,
     VoiceCommandPayload,
     VoiceCommandResult,
 )
@@ -184,6 +186,8 @@ __all__ = [
     # Voice
     "VoiceCommandPayload",
     "VoiceCommandResult",
+    "TranscriptionResult",
+    "STTHealthStatus",
     # Multimodal
     "MultimodalInputItem",
     "MultimodalFusionPayload",
