@@ -240,12 +240,24 @@ def main() -> int:
 
     # 11. task assignment & execution lifecycle -> task_results in PostgreSQL
     assignment_id = "61000000-0000-0000-0000-000000000001"
+    workflow_id = "e0000000-0000-0000-0000-000000000001"
     st, start_res = call(
         "POST",
         f"/api/v1/tasks/assignments/{assignment_id}/start",
         worker_token,
     )
     check("task assignment start", st in (200, 409), f"{st} {start_res}")
+
+    wa_id = start_res.get("workflow_assignment_id") if isinstance(start_res, dict) else None
+    st_steps, steps = call("GET", f"/api/v1/tasks/workflows/{workflow_id}/steps", worker_token)
+    if wa_id and isinstance(steps, list):
+        for step in steps:
+            call(
+                "POST",
+                f"/api/v1/tasks/workflows/assignments/{wa_id}/steps/{step['id']}/execute",
+                worker_token,
+                {"status": "completed", "execution_data": {"action": "step_done"}},
+            )
 
     st, comp_res = call(
         "POST",
@@ -259,7 +271,7 @@ def main() -> int:
         "SELECT outcome FROM task_results WHERE worker_task_assignment_id = %s",
         (assignment_id,),
     )
-    check("task_results row in PostgreSQL", bool(res_rows), f"{res_rows}")
+    check("task_results row in PostgreSQL", bool(res_rows and res_rows[0][0] == "completed"), f"{res_rows}")
 
     # 12. assistance request lifecycle -> PostgreSQL persistence
     st, req_res = call(
@@ -283,7 +295,11 @@ def main() -> int:
         check("assistance_requests status 'resolved' in PostgreSQL", bool(ast_row and ast_row[0][0] == "resolved"), f"{ast_row}")
 
     # 13. custom gesture training & lifecycle -> custom_gestures in PostgreSQL
-    sample_landmarks = [{"x": 0.5 + 0.001 * i, "y": 0.5, "z": 0.0} for i in range(21)]
+    # Provide 5 realistic hand landmark samples where wrist is (0.5, 0.8) and middle MCP is (0.5, 0.5)
+    sample_landmarks = [
+        {"x": 0.5 + 0.01 * (i % 5), "y": 0.8 - 0.03 * i, "z": 0.0}
+        for i in range(21)
+    ]
     five_samples = [sample_landmarks for _ in range(5)]
     st, train_res = call(
         "POST",
