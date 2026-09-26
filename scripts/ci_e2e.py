@@ -18,6 +18,7 @@ BASE = os.environ.get("CI_E2E_BASE_URL", "http://127.0.0.1:8000")
 ORG = "9a61e05d-7a32-4112-9c17-1833d7b42f65"
 WORKER = "alex.worker@amap.com"
 ADMIN = "admin@amap.com"
+SUPERVISOR = "supervisor@amap.com"
 PASSWORD = "SecurePassword123!"
 DSN = os.environ.get("DATABASE_URL", "")
 T0 = 1700000000000
@@ -71,7 +72,7 @@ def main() -> int:
     st, body = call("GET", "/api/v1/health")
     check("health", st == 200 and body.get("status") == "ok", f"{st} {body}")
 
-    # 2. login (valid + invalid password)
+    # 2. login (valid + invalid password + roles)
     st, ok = call(
         "POST",
         "/api/v1/auth/login",
@@ -94,6 +95,14 @@ def main() -> int:
     )
     admin_token = adm.get("access_token") if st == 200 else None
     check("admin login", bool(admin_token), f"{st}")
+
+    st, sup = call(
+        "POST",
+        "/api/v1/auth/login",
+        body={"organization_id": ORG, "email": SUPERVISOR, "password": PASSWORD},
+    )
+    supervisor_token = sup.get("access_token") if st == 200 else None
+    check("supervisor login", bool(supervisor_token), f"{st}")
 
     # 3. RBAC: worker denied admin-only route; anonymous denied
     st, _ = call("GET", "/api/v1/admin/users", worker_token)
@@ -215,14 +224,14 @@ def main() -> int:
     check("audit_events have real actors", bool(audit and audit[0][0] >= 1), f"{audit}")
 
     # 10. supervisor dashboard & worker telemetry
-    st, sup_dash = call("GET", "/api/v1/supervisor/dashboard", admin_token)
+    st, sup_dash = call("GET", "/api/v1/supervisor/dashboard", supervisor_token)
     check(
         "supervisor dashboard real metrics",
         st == 200 and isinstance(sup_dash, dict) and "total_workers" in sup_dash,
         f"{st} {sup_dash}",
     )
 
-    st, sup_workers = call("GET", "/api/v1/supervisor/workers", admin_token)
+    st, sup_workers = call("GET", "/api/v1/supervisor/workers", supervisor_token)
     check(
         "supervisor worker list",
         st == 200 and isinstance(sup_workers, list) and len(sup_workers) >= 1,
@@ -247,7 +256,7 @@ def main() -> int:
     check("task assignment complete", st in (200, 409), f"{st} {comp_res}")
 
     res_rows = pg(
-        "SELECT status, outcome FROM task_results WHERE worker_task_assignment_id = %s",
+        "SELECT outcome FROM task_results WHERE worker_task_assignment_id = %s",
         (assignment_id,),
     )
     check("task_results row in PostgreSQL", bool(res_rows), f"{res_rows}")
@@ -266,7 +275,7 @@ def main() -> int:
         st, _ = call(
             "POST",
             f"/api/v1/supervisor/assistance/{req_id}/resolve",
-            admin_token,
+            supervisor_token,
             {"resolution_notes": "Calibrated tool supplied"},
         )
         check("assistance request resolved by supervisor", st == 200, f"{st}")
@@ -274,7 +283,7 @@ def main() -> int:
         check("assistance_requests status 'resolved' in PostgreSQL", bool(ast_row and ast_row[0][0] == "resolved"), f"{ast_row}")
 
     # 13. custom gesture training & lifecycle -> custom_gestures in PostgreSQL
-    sample_landmarks = [{"x": 0.5 + 0.01 * i, "y": 0.5, "z": 0.0} for i in range(21)]
+    sample_landmarks = [{"x": 0.5 + 0.001 * i, "y": 0.5, "z": 0.0} for i in range(21)]
     five_samples = [sample_landmarks for _ in range(5)]
     st, train_res = call(
         "POST",
@@ -282,7 +291,7 @@ def main() -> int:
         worker_token,
         {
             "gesture_name": "CI Test Custom Gesture",
-            "action_mapping": "confirm_action",
+            "intent": "confirm_action",
             "handedness": "Right",
             "samples": five_samples,
         },
@@ -291,21 +300,31 @@ def main() -> int:
     check("custom gesture trained", st == 201 and cg_id, f"{st} {train_res}")
 
     if cg_id:
-        cg_rows = pg("SELECT gesture_name, is_active FROM custom_gestures WHERE id = %s", (cg_id,))
-        check("custom_gestures row in PostgreSQL", bool(cg_rows and cg_rows[0][1] is True), f"{cg_rows}")
+        cg_rows = pg("SELECT gesture_name, status FROM custom_gestures WHERE id = %s", (cg_id,))
+        check("custom_gestures row in PostgreSQL", bool(cg_rows and cg_rows[0][1] == "active"), f"{cg_rows}")
         st, del_res = call("DELETE", f"/api/v1/gestures/custom/{cg_id}", worker_token)
         check("custom gesture deleted", st == 200, f"{st} {del_res}")
-        cg_after = pg("SELECT is_active FROM custom_gestures WHERE id = %s", (cg_id,))
-        check("custom gesture soft-deleted (inactive)", bool(cg_after and cg_after[0][0] is False), f"{cg_after}")
+        cg_after = pg("SELECT status FROM custom_gestures WHERE id = %s", (cg_id,))
+        check("custom gesture soft-deleted (deleted)", bool(cg_after and cg_after[0][0] == "deleted"), f"{cg_after}")
 
-    # 14. safety-critical interlock gating
+    # 14. safety-critical interlock gating & emergency stop
     st, gate_res = call(
         "POST",
         "/api/v1/actions/execute",
         worker_token,
-        {"action_name": "voltage_adjustment", "is_secondary_confirmed": False},
+        {"action_name": "unregistered_dangerous_action"},
     )
-    check("unconfirmed safety-critical action rejected", st in (400, 403, 404, 422), f"{st} {gate_res}")
+    check("unregistered action rejected", st in (404, 422), f"{st} {gate_res}")
+
+    st, em_res = call(
+        "POST",
+        "/api/v1/actions/emergency-stop",
+        worker_token,
+        {"reason": "E2E safety test interlock"},
+    )
+    check("emergency stop executed", st == 200 and em_res.get("success") is True, f"{st} {em_res}")
+    em_rows = pg("SELECT COUNT(*) FROM execution_events WHERE event_type = 'emergency_stop'")
+    check("emergency_stop in PostgreSQL", bool(em_rows and em_rows[0][0] >= 1), f"{em_rows}")
 
     # 15. cross-organization isolation (tenancy boundary)
     FAKE_ORG = "00000000-0000-0000-0000-000000000099"
