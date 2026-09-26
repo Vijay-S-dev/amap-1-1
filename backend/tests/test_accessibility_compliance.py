@@ -191,5 +191,7 @@ def test_client_document_language_synchronization():
     context_code = context_path.read_text(encoding="utf-8")
 
     assert "document.documentElement.lang = activeLang" in context_code, "Client must sync document.documentElement.lang"
-    assert "'en', 'es', 'ta', 'hi', 'de'" in context_code, "Must validate supported AMAP language codes"
+    assert "'en', 'hi'" in context_code, "Must validate supported AMAP language codes (en/hi only)"
+    assert "'es'" not in context_code and "'ta'" not in context_code and "'de'" not in context_code, \
+        "Unsupported languages must be removed from the language context"
 

@@ -39,7 +39,7 @@ class WorkerReadinessResponse(AMAPBaseModel):
 
 
 class CertifyReadinessRequest(StrictInputModel):
-    selected_language: str = "en"
+    selected_language: str = Field(default="en", pattern="^(en|hi)$")
     selected_modality: str = "multimodal"
     calibrated_dwell_ms: int = 500
     training_order_id: str = "Order #1042 Level 1"

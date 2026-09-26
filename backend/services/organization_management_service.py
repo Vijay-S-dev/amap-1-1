@@ -175,7 +175,7 @@ class OrganizationManagementService:
             contact_email=org.get("contact_email"),
             status=org.get("status", "active"),
             default_language=org.get("default_language") or "en",
-            supported_languages=list(supported) if isinstance(supported, list) else ["en", "es", "ta", "hi", "de"],
+            supported_languages=list(supported) if isinstance(supported, list) else ["en", "hi"],
             accessibility_defaults=dict(accessibility) if isinstance(accessibility, dict) else {
                 "default_dwell_time_ms": 500,
                 "high_contrast_default": False,
@@ -203,11 +203,23 @@ class OrganizationManagementService:
 
         if "supported_languages" in changes:
             langs = changes["supported_languages"]
-            if not isinstance(langs, list) or not langs or not all(
-                isinstance(x, str) and x for x in langs
+            if (
+                not isinstance(langs, list)
+                or not langs
+                or any(
+                    not isinstance(x, str) or x not in ("en", "hi")
+                    for x in langs
+                )
             ):
-                raise ValidationError("supported_languages must be a non-empty list of language codes.")
-        if "accessibility_defaults" in changes and not isinstance(changes["accessibility_defaults"], dict):
+                raise ValidationError(
+                    "supported_languages must be a non-empty list containing only 'en' and 'hi'."
+                )
+
+        if "default_language" in changes and changes["default_language"] not in ("en", "hi"):
+            raise ValidationError("default_language must be 'en' or 'hi'.")
+        if "accessibility_defaults" in changes and not isinstance(
+            changes["accessibility_defaults"], dict
+        ):
             raise ValidationError("accessibility_defaults must be an object.")
         if "name" in changes and not str(name).strip():
             raise ValidationError("Organization name cannot be empty.")
@@ -222,16 +234,22 @@ class OrganizationManagementService:
                 organization_id=organization_id,
                 name=name,
                 organization_type=changes.get(
-                    "organization_type", org.get("organization_type") or "industrial_manufacturing"
+                    "organization_type",
+                    org.get("organization_type") or "industrial_manufacturing",
                 ),
-                industry=changes.get("industry", org.get("industry") or "Automotive & Aerospace Assembly"),
-                location=changes.get("location", org.get("location") or "Main Operations Facility"),
+                industry=changes.get(
+                    "industry",
+                    org.get("industry") or "Automotive & Aerospace Assembly",
+                ),
+                location=changes.get(
+                    "location", org.get("location") or "Main Operations Facility"
+                ),
                 contact_email=changes.get("contact_email", org.get("contact_email")),
                 default_language=changes.get("default_language", org.get("default_language") or "en"),
                 supported_languages=changes.get(
                     "supported_languages",
                     list(org["supported_languages"]) if isinstance(org.get("supported_languages"), list)
-                    else ["en", "es", "ta", "hi", "de"],
+                    else ["en", "hi"],
                 ),
                 accessibility_defaults=changes.get(
                     "accessibility_defaults",

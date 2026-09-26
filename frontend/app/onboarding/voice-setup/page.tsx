@@ -43,29 +43,11 @@ const TRAINING_STEPS_BY_LANG: Record<SupportedLanguage, TrainingStep[]> = {
     { id: 'help', intent: 'ASSISTANCE', displayKeyword: 'Help', instructionPrompt: 'Say: "Help" or "Supervisor"', actionMapping: 'request_assistance', expectedAction: 'request_assistance', completed: false },
     { id: 'stop', intent: 'EMERGENCY_STOP', displayKeyword: 'Stop', instructionPrompt: 'Say: "Stop" or "Emergency Stop"', actionMapping: 'emergency_stop', expectedAction: 'emergency_stop', completed: false },
   ],
-  es: [
-    { id: 'confirm', intent: 'CONFIRM', displayKeyword: 'Confirmar', instructionPrompt: 'Diga: "Confirmar"', actionMapping: 'confirm_action', expectedAction: 'confirm_action', completed: false },
-    { id: 'next', intent: 'NEXT_STEP', displayKeyword: 'Siguiente', instructionPrompt: 'Diga: "Siguiente" o "Continuar"', actionMapping: 'next_step', expectedAction: 'next_step', completed: false },
-    { id: 'help', intent: 'ASSISTANCE', displayKeyword: 'Ayuda', instructionPrompt: 'Diga: "Ayuda" o "Soporte"', actionMapping: 'request_assistance', expectedAction: 'request_assistance', completed: false },
-    { id: 'stop', intent: 'EMERGENCY_STOP', displayKeyword: 'Detener', instructionPrompt: 'Diga: "Detener" o "Parada"', actionMapping: 'emergency_stop', expectedAction: 'emergency_stop', completed: false },
-  ],
-  ta: [
-    { id: 'confirm', intent: 'CONFIRM', displayKeyword: 'உறுதி (Confirm)', instructionPrompt: 'சொல்லுங்கள்: "உறுதி" (Confirm)', actionMapping: 'confirm_action', expectedAction: 'confirm_action', completed: false },
-    { id: 'next', intent: 'NEXT_STEP', displayKeyword: 'அடுத்து (Next)', instructionPrompt: 'சொல்லுங்கள்: "அடுத்து" (Next)', actionMapping: 'next_step', expectedAction: 'next_step', completed: false },
-    { id: 'help', intent: 'ASSISTANCE', displayKeyword: 'உதவி (Help)', instructionPrompt: 'சொல்லுங்கள்: "உதவி" (Help)', actionMapping: 'request_assistance', expectedAction: 'request_assistance', completed: false },
-    { id: 'stop', intent: 'EMERGENCY_STOP', displayKeyword: 'நிறுத்து (Stop)', instructionPrompt: 'சொல்லுங்கள்: "நிறுத்து" (Stop)', actionMapping: 'emergency_stop', expectedAction: 'emergency_stop', completed: false },
-  ],
   hi: [
     { id: 'confirm', intent: 'CONFIRM', displayKeyword: 'पुष्टि (Confirm)', instructionPrompt: 'बोलिए: "पुष्टि" (Confirm)', actionMapping: 'confirm_action', expectedAction: 'confirm_action', completed: false },
     { id: 'next', intent: 'NEXT_STEP', displayKeyword: 'अगला (Next)', instructionPrompt: 'बोलिए: "अगला" (Next)', actionMapping: 'next_step', expectedAction: 'next_step', completed: false },
     { id: 'help', intent: 'ASSISTANCE', displayKeyword: 'मदद (Help)', instructionPrompt: 'बोलिए: "मदद" (Help)', actionMapping: 'request_assistance', expectedAction: 'request_assistance', completed: false },
     { id: 'stop', intent: 'EMERGENCY_STOP', displayKeyword: 'रोकें (Stop)', instructionPrompt: 'बोलिए: "रोकें" (Stop)', actionMapping: 'emergency_stop', expectedAction: 'emergency_stop', completed: false },
-  ],
-  de: [
-    { id: 'confirm', intent: 'CONFIRM', displayKeyword: 'Bestätigen', instructionPrompt: 'Sagen Sie: "Bestätigen"', actionMapping: 'confirm_action', expectedAction: 'confirm_action', completed: false },
-    { id: 'next', intent: 'NEXT_STEP', displayKeyword: 'Weiter', instructionPrompt: 'Sagen Sie: "Weiter"', actionMapping: 'next_step', expectedAction: 'next_step', completed: false },
-    { id: 'help', intent: 'ASSISTANCE', displayKeyword: 'Hilfe', instructionPrompt: 'Sagen Sie: "Hilfe"', actionMapping: 'request_assistance', expectedAction: 'request_assistance', completed: false },
-    { id: 'stop', intent: 'EMERGENCY_STOP', displayKeyword: 'Stopp', instructionPrompt: 'Sagen Sie: "Stopp"', actionMapping: 'emergency_stop', expectedAction: 'emergency_stop', completed: false },
   ],
 };
 

@@ -163,7 +163,7 @@ def test_fresher_worker_readiness_and_certification(client):
     cert_resp = client.post(
         f"/api/v1/workers/{maria_id}/readiness/certify",
         json={
-            "selected_language": "es",
+            "selected_language": "hi",
             "selected_modality": "multimodal",
             "calibrated_dwell_ms": 550,
             "training_order_id": "Order #1042 Level 1",
@@ -179,7 +179,7 @@ def test_fresher_worker_readiness_and_certification(client):
     assert cert_data["onboarding_completed"] is True
     assert cert_data["readiness_status"] == "ready"
     assert cert_data["overall_ready"] is True
-    assert cert_data["active_preferences"]["language"] == "es"
+    assert cert_data["active_preferences"]["language"] == "hi"
 
 
 def test_gesture_only_readiness_does_not_require_voice(client, new_worker_profile):
@@ -215,7 +215,7 @@ def test_voice_only_readiness_does_not_require_gesture(client, new_worker_profil
     cert_resp = client.post(
         f"/api/v1/workers/{worker_id}/readiness/certify",
         json={
-            "selected_language": "de",
+            "selected_language": "hi",
             "selected_modality": "voice",
             "calibrated_dwell_ms": 500,
             "training_order_id": "Order #1042 Level 1",

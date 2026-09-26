@@ -6,8 +6,9 @@
  * audio feedback beeps, and language context.
  */
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { SupportedLanguage, t } from '../i18n/languages';
+import { api } from '../api/client';
 
 export type InteractionModality = 'multimodal' | 'gesture' | 'voice' | 'ui';
 
@@ -58,6 +59,78 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   const [hasCompletedVoiceSetup, setHasCompletedVoiceSetupState] = useState<boolean>(false);
   const [hasCompletedTraining, setHasCompletedTrainingState] = useState<boolean>(false);
 
+  // Server-authoritative persistence (Phase 10): localStorage is only an
+  // offline/boot cache; PostgreSQL is the source of truth after login.
+  const prefsRef = useRef<Record<string, unknown>>({});
+  const serverSyncedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    prefsRef.current = {
+      language,
+      modality,
+      highContrast,
+      textScale,
+      reducedMotion,
+      audioFeedback,
+      hasCompletedLanguage,
+      hasCompletedAccessibility,
+      hasCompletedGestureCalibration,
+      hasCompletedVoiceSetup,
+      hasCompletedTraining,
+    };
+  });
+
+  const persistPrefs = (patch: Record<string, unknown>) => {
+    const payload = { ...prefsRef.current, ...patch };
+    prefsRef.current = payload;
+    if (!api.getToken()) return; // pre-login: cache only
+    api
+      .updateAccessibilityPreferences(payload)
+      .then(() => {
+        serverSyncedRef.current = true;
+      })
+      .catch(() => {
+        announce('Preferences could not be synced to the server.');
+      });
+  };
+
+  const applyServerPrefs = (server: Record<string, unknown>) => {
+    if (typeof server.language === 'string' && ['en', 'hi'].includes(server.language)) {
+      setLanguageState(server.language as SupportedLanguage);
+    }
+    if (typeof server.modality === 'string') {
+      setModalityState(server.modality as InteractionModality);
+    }
+    if (typeof server.highContrast === 'boolean') setHighContrastState(server.highContrast);
+    if (typeof server.textScale === 'number') setTextScaleState(server.textScale);
+    if (typeof server.reducedMotion === 'boolean') setReducedMotionState(server.reducedMotion);
+    if (typeof server.audioFeedback === 'boolean') setAudioFeedbackState(server.audioFeedback);
+    if (typeof server.hasCompletedLanguage === 'boolean')
+      setHasCompletedLanguageState(server.hasCompletedLanguage);
+    if (typeof server.hasCompletedAccessibility === 'boolean')
+      setHasCompletedAccessibilityState(server.hasCompletedAccessibility);
+    if (typeof server.hasCompletedGestureCalibration === 'boolean')
+      setHasCompletedGestureCalibrationState(server.hasCompletedGestureCalibration);
+    if (typeof server.hasCompletedVoiceSetup === 'boolean')
+      setHasCompletedVoiceSetupState(server.hasCompletedVoiceSetup);
+    if (typeof server.hasCompletedTraining === 'boolean')
+      setHasCompletedTrainingState(server.hasCompletedTraining);
+    prefsRef.current = { ...prefsRef.current, ...server };
+    // re-mirror into localStorage so the boot cache matches server truth
+    if (typeof window !== 'undefined') {
+      if (typeof server.language === 'string') localStorage.setItem('amap_lang', server.language);
+      if (typeof server.modality === 'string') localStorage.setItem('amap_modality', server.modality);
+      if (typeof server.highContrast === 'boolean')
+        localStorage.setItem('amap_high_contrast', String(server.highContrast));
+      if (typeof server.textScale === 'number')
+        localStorage.setItem('amap_text_scale', String(server.textScale));
+      if (typeof server.reducedMotion === 'boolean')
+        localStorage.setItem('amap_reduced_motion', String(server.reducedMotion));
+      if (typeof server.audioFeedback === 'boolean')
+        localStorage.setItem('amap_audio_feedback', String(server.audioFeedback));
+    }
+  };
+
   // Load from localStorage on mount
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -84,12 +157,27 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
     setHasCompletedGestureCalibrationState(localStorage.getItem('amap_ob_gest') === 'true');
     setHasCompletedVoiceSetupState(localStorage.getItem('amap_ob_voice') === 'true');
     setHasCompletedTrainingState(localStorage.getItem('amap_ob_train') === 'true');
+
+    // PostgreSQL is authoritative once authenticated (refresh/logout/login safe)
+    if (api.getToken()) {
+      api
+        .getAccessibilityPreferences()
+        .then((server) => {
+          if (server && Object.keys(server).length > 0) {
+            applyServerPrefs(server);
+            serverSyncedRef.current = true;
+          }
+        })
+        .catch(() => {
+          // offline or 401: keep the localStorage boot cache
+        });
+    }
   }, []);
 
   // Synchronize document.documentElement.lang safely from the client (WCAG 3.1.1)
   useEffect(() => {
     if (typeof document !== 'undefined') {
-      const supportedLanguages: SupportedLanguage[] = ['en', 'es', 'ta', 'hi', 'de'];
+      const supportedLanguages: SupportedLanguage[] = ['en', 'hi'];
       const activeLang = supportedLanguages.includes(language) ? language : 'en';
       document.documentElement.lang = activeLang;
     }
@@ -107,56 +195,67 @@ export function AccessibilityProvider({ children }: { children: React.ReactNode 
   const setLanguage = (lang: SupportedLanguage) => {
     setLanguageState(lang);
     if (typeof window !== 'undefined') localStorage.setItem('amap_lang', lang);
+    persistPrefs({ language: lang });
   };
 
   const setModality = (mod: InteractionModality) => {
     setModalityState(mod);
     if (typeof window !== 'undefined') localStorage.setItem('amap_modality', mod);
+    persistPrefs({ modality: mod });
   };
 
   const setHighContrast = (val: boolean) => {
     setHighContrastState(val);
     if (typeof window !== 'undefined') localStorage.setItem('amap_high_contrast', String(val));
+    persistPrefs({ highContrast: val });
   };
 
   const setTextScale = (val: number) => {
     setTextScaleState(val);
     if (typeof window !== 'undefined') localStorage.setItem('amap_text_scale', String(val));
+    persistPrefs({ textScale: val });
   };
 
   const setReducedMotion = (val: boolean) => {
     setReducedMotionState(val);
     if (typeof window !== 'undefined') localStorage.setItem('amap_reduced_motion', String(val));
+    persistPrefs({ reducedMotion: val });
   };
 
   const setAudioFeedback = (val: boolean) => {
     setAudioFeedbackState(val);
     if (typeof window !== 'undefined') localStorage.setItem('amap_audio_feedback', String(val));
+    persistPrefs({ audioFeedback: val });
   };
 
   const setHasCompletedLanguage = (val: boolean) => {
     setHasCompletedLanguageState(val);
     if (typeof window !== 'undefined') localStorage.setItem('amap_ob_lang', String(val));
+    persistPrefs({ hasCompletedLanguage: val });
   };
 
   const setHasCompletedAccessibility = (val: boolean) => {
     setHasCompletedAccessibilityState(val);
     if (typeof window !== 'undefined') localStorage.setItem('amap_ob_acc', String(val));
+    persistPrefs({ hasCompletedAccessibility: val });
   };
 
   const setHasCompletedGestureCalibration = (val: boolean) => {
     setHasCompletedGestureCalibrationState(val);
     if (typeof window !== 'undefined') localStorage.setItem('amap_ob_gest', String(val));
+    persistPrefs({ hasCompletedGestureCalibration: val });
   };
 
   const setHasCompletedVoiceSetup = (val: boolean) => {
     setHasCompletedVoiceSetupState(val);
     if (typeof window !== 'undefined') localStorage.setItem('amap_ob_voice', String(val));
+    persistPrefs({ hasCompletedVoiceSetup: val });
   };
 
   const setHasCompletedTraining = (val: boolean) => {
     setHasCompletedTrainingState(val);
     if (typeof window !== 'undefined') localStorage.setItem('amap_ob_train', String(val));
+    persistPrefs({ hasCompletedTraining: val });
   };
 
   const isReady =

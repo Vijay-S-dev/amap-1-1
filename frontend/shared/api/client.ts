@@ -881,6 +881,22 @@ class ApiClient {
     return await this.request<any[]>(`/organizations/manage/audit?limit=${limit}`);
   }
 
+  // Phase 10: accessibility preferences (PostgreSQL-authoritative)
+  async getAccessibilityPreferences(): Promise<Record<string, unknown>> {
+    return await this.request<Record<string, unknown>>(
+      '/accessibility/preferences'
+    );
+  }
+
+  async updateAccessibilityPreferences(
+    preferences: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    return await this.request<Record<string, unknown>>(
+      '/accessibility/preferences',
+      { method: 'PUT', body: JSON.stringify({ preferences }) }
+    );
+  }
+
   async getAuditLogs(limit: number = 50): Promise<any[]> {
     return this.getOrgAudit(limit);
   }

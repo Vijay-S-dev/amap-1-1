@@ -31,7 +31,7 @@ class OrganizationProfileRead(AMAPBaseModel):
     contact_email: Optional[str] = None
     status: str
     default_language: str = "en"
-    supported_languages: List[str] = Field(default_factory=lambda: ["en", "es", "ta", "hi", "de"])
+    supported_languages: List[str] = Field(default_factory=lambda: ["en", "hi"])
     accessibility_defaults: Dict[str, Any] = Field(
         default_factory=lambda: {
             "default_dwell_time_ms": 500,

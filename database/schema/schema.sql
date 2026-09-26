@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS organizations (
     location TEXT NOT NULL DEFAULT 'Main Operations Facility',
     contact_email TEXT,
     default_language TEXT NOT NULL DEFAULT 'en',
-    supported_languages JSONB NOT NULL DEFAULT '["en", "es", "ta", "hi", "de"]'::jsonb,
+    supported_languages JSONB NOT NULL DEFAULT '["en", "hi"]'::jsonb,
     accessibility_defaults JSONB NOT NULL DEFAULT jsonb_build_object(
         'default_dwell_time_ms', 500,
         'high_contrast_default', FALSE,
