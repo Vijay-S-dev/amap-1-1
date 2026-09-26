@@ -127,7 +127,24 @@ jobs:
         run: python scripts/prefetch_whisper_model.py
 
       - name: docker compose build
-        run: docker compose build --pull
+        run: |
+          set -o pipefail
+          if docker compose build --pull 2>&1 | tee /tmp/compose-build.log; then
+            {
+              echo "### docker compose build: OK"
+              echo '```'
+              tail -20 /tmp/compose-build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "### docker compose build: FAILED (last 150 lines)"
+              echo '```'
+              tail -150 /tmp/compose-build.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
 
       - name: docker compose up
         run: docker compose up -d
@@ -142,8 +159,13 @@ jobs:
             fi
             sleep 1
           done
-          echo "stack did not become ready in time"
-          docker compose logs
+          {
+            echo "### stack did not become ready in time"
+            echo '```'
+            docker compose ps
+            docker compose logs --tail 150
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
       - name: Login + fusion + executed action inside the stack
