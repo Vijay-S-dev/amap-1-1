@@ -47,8 +47,8 @@ services:
       - /bin/sh
       - -c
       - |
-        python scripts/migrate.py &&
-        python scripts/seed.py
+        python /app/scripts/migrate.py &&
+        python /app/scripts/seed.py
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-amap_user}:${POSTGRES_PASSWORD:-amap_password}@postgres:5432/${POSTGRES_DB:-amap}
     depends_on:

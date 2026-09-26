@@ -59,22 +59,36 @@ def main() -> int:
     ensure_repo(CHECKPOINT_URL, SCRATCH / "tiny-model")
     ensure_repo(WHISPER_ASSETS_URL, SCRATCH / "openai-whisper")
 
-    # Tooling (PyPI only) for the conversion step; not needed at runtime.
+    # Tooling (PyPI only) for the conversion + verification steps; runtime
+    # dependencies remain in backend/requirements.txt.
     run([python, "-m", "pip", "install", "--quiet",
-         "torch", "transformers", "tiktoken"])
+         "torch", "transformers", "tiktoken", "faster-whisper"])
 
     converter = SCRATCH / "convert_openai_to_hf.py"
     if not converter.exists():
-        raw = subprocess.run(
-            ["gh", "api",
-             "repos/huggingface/transformers/contents/"
-             "src/transformers/models/whisper/convert_openai_to_hf.py",
-             "--jq", ".content"],
-            capture_output=True, text=True, check=True,
-        )
-        import base64
+        text_src = None
+        # Preferred: plain HTTPS (works on CI runners with normal internet).
+        try:
+            import urllib.request
 
-        converter.write_text(base64.b64decode(raw.stdout).decode())
+            with urllib.request.urlopen(CONVERTER_URL, timeout=60) as resp:
+                text_src = resp.read().decode()
+        except Exception as exc:  # noqa: BLE001
+            print(f"HTTPS fetch failed ({exc}); falling back to gh api")
+        if text_src is None:
+            # Fallback: GitHub API (works in sandboxes where raw.githubusercontent
+            # is blocked but gh is authenticated).
+            import base64
+
+            raw = subprocess.run(
+                ["gh", "api",
+                 "repos/huggingface/transformers/contents/"
+                 "src/transformers/models/whisper/convert_openai_to_hf.py",
+                 "--jq", ".content"],
+                capture_output=True, text=True, check=True,
+            )
+            text_src = base64.b64decode(raw.stdout).decode()
+        converter.write_text(text_src, encoding="utf-8")
     text = converter.read_text(encoding="utf-8")
     if "_LOCAL_WHISPER_ASSETS" not in text:
         # offline patches: local tiktoken assets + offline generation config
