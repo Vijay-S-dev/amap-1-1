@@ -185,24 +185,24 @@ class OrganizationManagementService:
     # 3. Department Management (§ 7, § 8)
     # =========================================================================
 
+    @staticmethod
+    def _department_item(row: Dict[str, Any]) -> DepartmentItem:
+        return DepartmentItem(
+            id=row["id"],
+            organization_id=row["organization_id"],
+            name=row["name"],
+            status=row["status"],
+            supervisor_count=int(row.get("supervisor_count") or 0),
+            worker_count=int(row.get("worker_count") or 0),
+            active_tasks_count=int(row.get("active_tasks_count") or 0),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
     def list_departments(self, organization_id: UUID) -> List[DepartmentItem]:
-        """List all departments belonging to this organization."""
-        records = self.depts_repo.list_by_organization(organization_id)
-        now = datetime.now(timezone.utc)
-        return [
-            DepartmentItem(
-                id=r["id"],
-                organization_id=r["organization_id"],
-                name=r["name"],
-                status=r.get("status", "active"),
-                supervisor_count=1,
-                worker_count=2,
-                active_tasks_count=1,
-                created_at=r.get("created_at") or now,
-                updated_at=r.get("updated_at") or now,
-            )
-            for r in records
-        ]
+        """List departments with real supervisor/worker/active-task aggregates."""
+        rows = self.depts_repo.list_by_organization_with_counts(organization_id)
+        return [self._department_item(row) for row in rows]
 
     def create_department(
         self,
@@ -210,13 +210,21 @@ class OrganizationManagementService:
         payload: DepartmentCreatePayload,
         actor_id: UUID,
     ) -> DepartmentItem:
-        """Create a new department scoped to the organization."""
+        """Create a new department scoped to the organization (409 on duplicate)."""
         existing = self.depts_repo.get_by_name(organization_id, payload.name)
         if existing:
-            raise ValidationError(f"Department '{payload.name}' already exists in this organization.")
+            raise ConflictError(
+                f"Department '{payload.name}' already exists in this organization."
+            )
 
-        created = self.depts_repo.create(organization_id=organization_id, name=payload.name)
-        now = datetime.now(timezone.utc)
+        try:
+            created = self.depts_repo.create(
+                organization_id=organization_id, name=payload.name
+            )
+        except errors.UniqueViolation as exc:
+            raise ConflictError(
+                f"Department '{payload.name}' already exists in this organization."
+            ) from exc
 
         self.audit_repo.create(
             organization_id=organization_id,
@@ -224,20 +232,11 @@ class OrganizationManagementService:
             event_type="department.created",
             resource_type="department",
             resource_id=created["id"],
-            event_data={"name": payload.name},
+            event_data={"name": payload.name, "status": created["status"]},
         )
 
-        return DepartmentItem(
-            id=created["id"],
-            organization_id=created["organization_id"],
-            name=created["name"],
-            status=created.get("status", "active"),
-            supervisor_count=0,
-            worker_count=0,
-            active_tasks_count=0,
-            created_at=created.get("created_at") or now,
-            updated_at=created.get("updated_at") or now,
-        )
+        counted = self.depts_repo.get_with_counts(created["id"])
+        return self._department_item(counted or created)
 
     def update_department(
         self,
@@ -246,13 +245,37 @@ class OrganizationManagementService:
         payload: DepartmentUpdatePayload,
         actor_id: UUID,
     ) -> DepartmentItem:
-        """Update department properties enforcing organization ownership."""
+        """Persist department rename/status changes (previously audit-only)."""
         dept = self.depts_repo.get_by_id(department_id)
         if not dept or dept["organization_id"] != organization_id:
             raise NotFoundError("Department not found in your organization.")
 
-        # Update in database if supported
-        now = datetime.now(timezone.utc)
+        new_name = payload.name
+        status_value = payload.status
+        # EntityStatus may be coerced to a plain string by model config.
+        new_status = getattr(status_value, "value", status_value) if status_value is not None else None
+        if new_name is None and new_status is None:
+            raise ValidationError("No changes supplied; provide name and/or status.")
+
+        if new_name is not None and new_name != dept["name"]:
+            clash = self.depts_repo.get_by_name(organization_id, new_name)
+            if clash and clash["id"] != department_id:
+                raise ConflictError(
+                    f"Department '{new_name}' already exists in this organization."
+                )
+
+        try:
+            updated = self.depts_repo.update(
+                department_id=department_id, name=new_name, status=new_status
+            )
+        except errors.UniqueViolation as exc:
+            raise ConflictError(
+                f"Department '{new_name}' already exists in this organization."
+            ) from exc
+
+        if updated is None:
+            raise ValidationError("No changes supplied; provide name and/or status.")
+
         self.audit_repo.create(
             organization_id=organization_id,
             actor_user_id=actor_id,
@@ -262,17 +285,8 @@ class OrganizationManagementService:
             event_data=payload.model_dump(exclude_unset=True),
         )
 
-        return DepartmentItem(
-            id=dept["id"],
-            organization_id=dept["organization_id"],
-            name=payload.name or dept["name"],
-            status=str(payload.status.value if payload.status and hasattr(payload.status, "value") else (payload.status or dept.get("status", "active"))),
-            supervisor_count=1,
-            worker_count=2,
-            active_tasks_count=1,
-            created_at=dept.get("created_at") or now,
-            updated_at=now,
-        )
+        counted = self.depts_repo.get_with_counts(department_id)
+        return self._department_item(counted or updated)
 
     def deactivate_department(
         self,
@@ -280,20 +294,31 @@ class OrganizationManagementService:
         department_id: UUID,
         actor_id: UUID,
     ) -> Dict[str, Any]:
-        """Deactivate department with organization isolation."""
+        """Deactivate department (real status mutation, previously audit-only)."""
         dept = self.depts_repo.get_by_id(department_id)
         if not dept or dept["organization_id"] != organization_id:
             raise NotFoundError("Department not found in your organization.")
 
-        self.audit_repo.create(
-            organization_id=organization_id,
-            actor_user_id=actor_id,
-            event_type="department.deactivated",
-            resource_type="department",
-            resource_id=department_id,
-            event_data={"name": dept["name"]},
-        )
-        return {"message": f"Department '{dept['name']}' has been deactivated."}
+        if dept["status"] != "inactive":
+            updated = self.depts_repo.update(
+                department_id=department_id, status="inactive"
+            )
+            if updated is None:
+                raise ValidationError("Department could not be deactivated.")
+            self.audit_repo.create(
+                organization_id=organization_id,
+                actor_user_id=actor_id,
+                event_type="department.deactivated",
+                resource_type="department",
+                resource_id=department_id,
+                event_data={"name": dept["name"], "previous_status": dept["status"]},
+            )
+
+        return {
+            "message": f"Department '{dept['name']}' has been deactivated.",
+            "id": str(department_id),
+            "status": "inactive",
+        }
 
     # =========================================================================
     # 4. Supervisor Management (§ 9, § 13)

@@ -192,9 +192,22 @@ def test_department_crud_and_tenant_isolation(mock_service):
         roles=["admin"],
         is_active=True,
     )
+    from datetime import datetime, timezone
+
     dept_id = uuid4()
-    mock_service.depts_repo.list_by_organization.return_value = [
-        {"id": dept_id, "organization_id": ORG_A_ID, "name": "Powertrain Integration", "status": "active"}
+    now = datetime.now(timezone.utc)
+    mock_service.depts_repo.list_by_organization_with_counts.return_value = [
+        {
+            "id": dept_id,
+            "organization_id": ORG_A_ID,
+            "name": "Powertrain Integration",
+            "status": "active",
+            "created_at": now,
+            "updated_at": now,
+            "supervisor_count": 0,
+            "worker_count": 0,
+            "active_tasks_count": 0,
+        }
     ]
     mock_service.depts_repo.get_by_name.return_value = None
     mock_service.depts_repo.create.return_value = {
@@ -202,6 +215,19 @@ def test_department_crud_and_tenant_isolation(mock_service):
         "organization_id": ORG_A_ID,
         "name": "Chassis Welding",
         "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
+    mock_service.depts_repo.get_with_counts.side_effect = lambda department_id: {
+        "id": department_id,
+        "organization_id": ORG_A_ID,
+        "name": "Chassis Welding",
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+        "supervisor_count": 0,
+        "worker_count": 0,
+        "active_tasks_count": 0,
     }
     app.dependency_overrides[get_org_management_service] = lambda: mock_service
 
