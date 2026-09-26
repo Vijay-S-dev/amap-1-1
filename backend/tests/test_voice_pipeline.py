@@ -43,39 +43,21 @@ def test_voice_exact_and_multilingual_matches():
     assert cmd == "request_assistance"
     assert action == "request_assistance"
 
-    # 2. Spanish commands
-    cmd_es, act_es, _, _ = service.match_command("siguiente")
-    assert cmd_es == "next_step"
-    assert act_es == "next_step"
-
-    cmd_es2, act_es2, _, _ = service.match_command("confirmar")
-    assert cmd_es2 == "confirm_action"
-    assert act_es2 == "confirm_action"
-
-    cmd_es3, act_es3, _, is_crit = service.match_command("detener")
-    assert cmd_es3 == "emergency_stop"
-    assert is_crit is True
-
-    # 3. German commands
-    cmd_de, act_de, _, _ = service.match_command("weiter")
-    assert cmd_de == "next_step"
-
-    cmd_de2, act_de2, _, _ = service.match_command("bestätigen")
-    assert cmd_de2 == "confirm_action"
-
-    # 4. Hindi commands
+    # 2. Hindi commands (devanagari and transliteration) — en/hi only product
     cmd_hi, act_hi, _, _ = service.match_command("अगला")
     assert cmd_hi == "next_step"
 
     cmd_hi2, act_hi2, _, _ = service.match_command("पुष्टि")
     assert cmd_hi2 == "confirm_action"
 
-    # 5. Tamil commands
-    cmd_ta, act_ta, _, _ = service.match_command("அடுத்து")
-    assert cmd_ta == "next_step"
+    cmd_hi3, act_hi3, _, _ = service.match_command("agla step")
+    assert cmd_hi3 == "next_step"
+    assert act_hi3 == "next_step"
 
-    cmd_ta2, act_ta2, _, _ = service.match_command("உறுதி")
-    assert cmd_ta2 == "confirm_action"
+    # 3. Unsupported languages are handled correctly: unmatched, not guessed
+    assert service.match_command("siguiente")[0] is None  # Spanish
+    assert service.match_command("weiter")[0] is None  # German
+    assert service.match_command("அடுத்து")[0] is None  # Tamil
 
 
 # =====================================================================

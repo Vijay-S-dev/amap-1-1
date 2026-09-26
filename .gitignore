@@ -31,3 +31,6 @@ backend/.pytest_cache/
 
 # Local SQLite state (removed from VCS; PostgreSQL is authoritative)
 backend/data/
+
+# Local speech-to-text model cache (prefetched at setup, never committed)
+backend/.whisper_cache/

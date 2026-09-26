@@ -73,9 +73,30 @@ def test_ffmpeg_converts_audio_to_temporary_wav(monkeypatch):
 def test_ffmpeg_unavailable_has_clear_error(monkeypatch):
     service = SpeechToTextService()
     monkeypatch.setattr("services.speech_to_text_service.shutil.which", lambda _: None)
+    # also block the bundled imageio-ffmpeg fallback
+    monkeypatch.setattr(
+        "services.speech_to_text_service._resolve_ffmpeg", lambda: None
+    )
 
     with pytest.raises(ValueError, match="FFmpeg executable was not found"):
         service._audio_to_wav(b"audio", "Recording.m4a")
+
+
+def test_ffmpeg_falls_back_to_bundled_binary(monkeypatch):
+    """PATH lookup failing must not break audio decode: the declared
+    imageio-ffmpeg dependency provides a bundled executable instead."""
+    service = SpeechToTextService()
+    import imageio_ffmpeg
+
+    bundled = imageio_ffmpeg.get_ffmpeg_exe()
+    monkeypatch.setattr("services.speech_to_text_service.shutil.which", lambda _: None)
+
+    assert (
+        Path := __import__("pathlib").Path
+    )  # noqa: F841
+    from services.speech_to_text_service import _resolve_ffmpeg
+
+    assert _resolve_ffmpeg() == bundled
 
 
 def test_confidence_calculation_exponential_bounds():

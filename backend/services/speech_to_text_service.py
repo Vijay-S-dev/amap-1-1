@@ -33,7 +33,38 @@ class STTModelState(str, Enum):
 
 
 SUPPORTED_LANGUAGES = ("en", "hi")
-MODEL_NAME = "tiny"
+
+# Explicit, environment-configurable model configuration. The download root
+# defaults to a workspace-local cache so the model can be prefetched once and
+# loaded with no network access at runtime.
+MODEL_NAME = (os.getenv("AMAP_WHISPER_MODEL") or "tiny").strip() or "tiny"
+DEFAULT_DOWNLOAD_ROOT = Path(__file__).resolve().parent.parent / ".whisper_cache"
+DOWNLOAD_ROOT = os.getenv("AMAP_WHISPER_DOWNLOAD_ROOT") or str(DEFAULT_DOWNLOAD_ROOT)
+
+
+def _resolve_model_source() -> str:
+    """Prefer a locally prefetched model directory (offline-safe), then an
+    explicit local path, then the configured Hugging Face model id."""
+    candidate = Path(DOWNLOAD_ROOT) / MODEL_NAME
+    if (candidate / "model.bin").is_file():
+        return str(candidate)
+    if Path(MODEL_NAME).is_dir() and (Path(MODEL_NAME) / "model.bin").is_file():
+        return MODEL_NAME
+    return MODEL_NAME
+
+
+def _resolve_ffmpeg() -> str | None:
+    """Locate an FFmpeg executable: PATH first, then the bundled imageio-ffmpeg
+    binary (declared dependency, works without a system install/Docker)."""
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path:
+        return ffmpeg_path
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:  # pragma: no cover - exercised when dependency missing
+        return None
 
 
 @dataclass
@@ -104,10 +135,18 @@ class SpeechToTextService:
             try:
                 from faster_whisper import WhisperModel
 
-                self._model = WhisperModel(
+                source = _resolve_model_source()
+                logger.info(
+                    "Loading Whisper model '%s' (source=%s, cache=%s)",
                     MODEL_NAME,
+                    source,
+                    DOWNLOAD_ROOT,
+                )
+                self._model = WhisperModel(
+                    source,
                     device="cpu",
                     compute_type="int8",
+                    download_root=DOWNLOAD_ROOT,
                 )
                 self._state = STTModelState.READY
             except Exception as exc:
@@ -116,7 +155,9 @@ class SpeechToTextService:
                 logger.exception("Unable to initialize faster-whisper")
                 raise RuntimeError(
                     "Speech-to-text model could not be loaded. "
-                    "Check faster-whisper installation and network access for the first download."
+                    "Verify faster-whisper and imageio-ffmpeg are installed, that "
+                    "AMAP_WHISPER_MODEL names a valid model, and that the model is "
+                    "prefetched into AMAP_WHISPER_DOWNLOAD_ROOT for offline startup."
                 ) from exc
         return self._model
 
@@ -126,7 +167,7 @@ class SpeechToTextService:
             raise ValueError("Audio payload is empty")
 
         suffix = Path(filename or "audio.webm").suffix.lower()
-        ffmpeg_path = shutil.which("ffmpeg")
+        ffmpeg_path = _resolve_ffmpeg()
         if not ffmpeg_path:
             raise ValueError(
                 "FFmpeg executable was not found on the backend PATH. "
@@ -219,12 +260,22 @@ class SpeechToTextService:
         try:
             audio_file = self._audio_to_wav(audio_bytes, filename)
             model = self._load_model()
-            segments_iter, info = model.transcribe(
-                audio_file.path,
-                language=normalized_requested_lang if language else None,
-                vad_filter=True,
-                beam_size=1,
-            )
+            try:
+                segments_iter, info = model.transcribe(
+                    audio_file.path,
+                    language=normalized_requested_lang,
+                    vad_filter=True,
+                    # beam 5 is the Whisper default: beam 1 on the tiny model is
+                    # nondeterministic on short clips and invites hallucinations.
+                    beam_size=5,
+                )
+            except IndexError as exc:
+                # faster-whisper raises IndexError when language auto-detection
+                # finds no probabilities; surface an honest 422 instead of a 503.
+                raise ValueError(
+                    "Speech language could not be auto-detected; "
+                    "provide language 'en' or 'hi'."
+                ) from exc
             segments = list(segments_iter)
             raw_info_lang = getattr(info, "language", None)
             info_language = raw_info_lang.lower().split("-")[0] if raw_info_lang else (normalized_requested_lang or "en")
