@@ -13,6 +13,18 @@ CREATE TABLE IF NOT EXISTS organizations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'archived')),
+    organization_type TEXT NOT NULL DEFAULT 'industrial_manufacturing',
+    industry TEXT NOT NULL DEFAULT 'Automotive & Aerospace Assembly',
+    location TEXT NOT NULL DEFAULT 'Main Operations Facility',
+    contact_email TEXT,
+    default_language TEXT NOT NULL DEFAULT 'en',
+    supported_languages JSONB NOT NULL DEFAULT '["en", "es", "ta", "hi", "de"]'::jsonb,
+    accessibility_defaults JSONB NOT NULL DEFAULT jsonb_build_object(
+        'default_dwell_time_ms', 500,
+        'high_contrast_default', FALSE,
+        'min_target_size_px', 48,
+        'voice_confirmation_default', FALSE
+    ),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

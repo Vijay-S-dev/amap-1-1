@@ -20,13 +20,15 @@ from models.interaction import (
 )
 from models.organization import OrganizationRead, OrganizationUpdate
 from models.user import UserRead
+from psycopg import errors
+
 from repositories.audit_events import AuditEventsRepository
 from repositories.interaction_configurations import InteractionConfigurationsRepository
 from repositories.organizations import OrganizationsRepository
 from repositories.roles import RolesRepository
 from repositories.user_roles import UserRolesRepository
 from repositories.users import UsersRepository
-from services.base import NotFoundError, ValidationError
+from services.base import ConflictError, NotFoundError, ValidationError
 
 
 class AdminService:
@@ -220,11 +222,21 @@ class AdminService:
             payload.status.value if hasattr(payload.status, "value") else str(payload.status)
         ) if payload.status is not None else existing["status"]
 
-        updated = self.orgs_repo.update(
-            organization_id=organization_id,
-            name=new_name,
-            status=new_status,
-        )
+        if new_name != existing["name"]:
+            clash = self.orgs_repo.get_by_name(new_name)
+            if clash and clash["id"] != organization_id:
+                raise ConflictError(f"An organization named '{new_name}' already exists.")
+
+        try:
+            updated = self.orgs_repo.update(
+                organization_id=organization_id,
+                name=new_name,
+                status=new_status,
+            )
+        except errors.UniqueViolation:
+            raise ConflictError(f"An organization named '{new_name}' already exists.")
+        if not updated:
+            raise NotFoundError("Organization not found.")
 
         self.audit_repo.create(
             organization_id=organization_id,
@@ -243,7 +255,7 @@ class AdminService:
 
     def list_organization_users(self, organization_id: UUID) -> List[UserRead]:
         """List all users within the organization."""
-        users = self.users_repo.list_by_organization_id(organization_id)
+        users = self.users_repo.list_by_organization(organization_id)
         return [UserRead.model_validate(u) for u in users]
 
     def update_user_status(
@@ -350,6 +362,7 @@ class AdminService:
             filtered = [r for r in filtered if r.get("actor_user_id") == actor_user_id]
         if resource_type:
             filtered = [r for r in filtered if r.get("resource_type") == resource_type]
+        filtered = filtered[: max(1, limit)]
 
         return [
             AuditEventRead(

@@ -31,7 +31,7 @@ from models.interaction import (
 from models.organization import OrganizationRead, OrganizationUpdate
 from models.user import UserRead
 from services.admin_service import AdminService
-from services.base import NotFoundError, ValidationError
+from services.base import ConflictError, NotFoundError, ValidationError
 
 router = APIRouter(prefix="/admin", tags=["Admin & System Configuration"])
 
@@ -183,6 +183,8 @@ def update_current_organization(
         )
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 # =====================================================================

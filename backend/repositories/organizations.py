@@ -22,7 +22,7 @@ class OrganizationsRepository:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
-                    SELECT id, name, status, created_at, updated_at
+                    SELECT id, name, status, organization_type, industry, location, contact_email, default_language, supported_languages, accessibility_defaults, created_at, updated_at
                     FROM organizations
                     WHERE id = %s
                     """,
@@ -36,7 +36,7 @@ class OrganizationsRepository:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
-                    SELECT id, name, status, created_at, updated_at
+                    SELECT id, name, status, organization_type, industry, location, contact_email, default_language, supported_languages, accessibility_defaults, created_at, updated_at
                     FROM organizations
                     WHERE name = %s
                     """,
@@ -50,7 +50,7 @@ class OrganizationsRepository:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
                     """
-                    SELECT id, name, status, created_at, updated_at
+                    SELECT id, name, status, organization_type, industry, location, contact_email, default_language, supported_languages, accessibility_defaults, created_at, updated_at
                     FROM organizations
                     ORDER BY name
                     """
@@ -65,7 +65,7 @@ class OrganizationsRepository:
                     """
                     INSERT INTO organizations (name)
                     VALUES (%s)
-                    RETURNING id, name, status, created_at, updated_at
+                    RETURNING id, name, status, organization_type, industry, location, contact_email, default_language, supported_languages, accessibility_defaults, created_at, updated_at
                     """,
                     (name,),
                 )
@@ -73,6 +73,103 @@ class OrganizationsRepository:
                 connection.commit()
 
                 return organization
+
+    def update_name(
+        self,
+        organization_id: UUID,
+        name: str,
+    ) -> dict[str, Any]:
+        """Update the organization name and return the refreshed row."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    UPDATE organizations
+                    SET name = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING id, name, status, organization_type, industry, location,
+                              contact_email, default_language, supported_languages,
+                              accessibility_defaults, created_at, updated_at
+                    """,
+                    (name, organization_id),
+                )
+                row = cursor.fetchone()
+                connection.commit()
+                return row
+
+    def update(
+        self,
+        organization_id: UUID,
+        name: str,
+        status: str,
+    ) -> dict[str, Any]:
+        """Update organization name/status and return the refreshed row."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    UPDATE organizations
+                    SET name = %s, status = %s, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING id, name, status, organization_type, industry, location,
+                              contact_email, default_language, supported_languages,
+                              accessibility_defaults, created_at, updated_at
+                    """,
+                    (name, status, organization_id),
+                )
+                row = cursor.fetchone()
+                connection.commit()
+                return row
+
+    def update_profile(
+        self,
+        organization_id: UUID,
+        name: str,
+        organization_type: str,
+        industry: str,
+        location: str,
+        contact_email: str | None,
+        default_language: str,
+        supported_languages: list[str],
+        accessibility_defaults: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Persist every exposed profile/settings field and return the row."""
+        import json
+
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    UPDATE organizations
+                    SET name = %s,
+                        organization_type = %s,
+                        industry = %s,
+                        location = %s,
+                        contact_email = %s,
+                        default_language = %s,
+                        supported_languages = %s::jsonb,
+                        accessibility_defaults = %s::jsonb,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING id, name, status, organization_type, industry, location,
+                              contact_email, default_language, supported_languages,
+                              accessibility_defaults, created_at, updated_at
+                    """,
+                    (
+                        name,
+                        organization_type,
+                        industry,
+                        location,
+                        contact_email,
+                        default_language,
+                        json.dumps(supported_languages),
+                        json.dumps(accessibility_defaults),
+                        organization_id,
+                    ),
+                )
+                row = cursor.fetchone()
+                connection.commit()
+                return row
 
     def delete_by_id(self, organization_id: UUID) -> bool:
         """

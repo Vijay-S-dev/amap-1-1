@@ -37,6 +37,8 @@ from repositories.assistance_requests import AssistanceRequestsRepository
 from repositories.audit_events import AuditEventsRepository
 from repositories.departments import DepartmentsRepository
 from repositories.organizations import OrganizationsRepository
+from repositories.tasks import TasksRepository
+from repositories.worker_task_assignments import WorkerTaskAssignmentsRepository
 from repositories.roles import RolesRepository
 from repositories.user_departments import UserDepartmentsRepository
 from repositories.user_roles import UserRolesRepository
@@ -60,6 +62,8 @@ class OrganizationManagementService:
         workers_repo: Optional[WorkerProfilesRepository] = None,
         workflows_repo: Optional[WorkflowsRepository] = None,
         workflow_steps_repo: Optional[WorkflowStepsRepository] = None,
+        tasks_repo: Optional[TasksRepository] = None,
+        worker_task_assignments_repo: Optional[WorkerTaskAssignmentsRepository] = None,
         audit_repo: Optional[AuditEventsRepository] = None,
         assistance_repo: Optional[AssistanceRequestsRepository] = None,
         user_departments_repo: Optional[UserDepartmentsRepository] = None,
@@ -73,6 +77,8 @@ class OrganizationManagementService:
         self.workers_repo = workers_repo or WorkerProfilesRepository()
         self.workflows_repo = workflows_repo or WorkflowsRepository()
         self.workflow_steps_repo = workflow_steps_repo or WorkflowStepsRepository()
+        self.tasks_repo = tasks_repo or TasksRepository()
+        self.worker_task_assignments_repo = worker_task_assignments_repo or WorkerTaskAssignmentsRepository()
         self.audit_repo = audit_repo or AuditEventsRepository()
         self.assistance_repo = assistance_repo or AssistanceRequestsRepository()
         self.user_departments_repo = user_departments_repo or UserDepartmentsRepository()
@@ -85,28 +91,52 @@ class OrganizationManagementService:
     # =========================================================================
 
     def get_organization_dashboard(self, organization_id: UUID) -> OrganizationDashboardKPIs:
-        """Aggregate real database statistics for the organization operational dashboard."""
+        """Aggregate real database statistics for the organization operational dashboard.
+
+        Worker KPIs come from the enterprise directory lifecycle, task KPIs
+        from worker_task_assignments rows, and assistance/emergency counts
+        from assistance_requests - no derived-from-invented-vocabulary
+        constants.
+        """
         org = self.orgs_repo.get_by_id(organization_id)
-        org_name = org.get("name") if isinstance(org, dict) else "Enterprise Organization"
-        if not isinstance(org_name, str):
-            org_name = "Enterprise Organization"
+        org_name = org.get("name") if isinstance(org, dict) else None
+        if not isinstance(org_name, str) or not org_name:
+            org_name = "Unknown organization"
 
         workers = self.list_workers(organization_id, page=1, page_size=500)["items"]
         supervisors = self.list_supervisors(organization_id)
         departments = self.list_departments(organization_id)
         workflows = self.list_workflows(organization_id)
+
+        total_workers = len(workers)
+        active_workers = sum(1 for w in workers if w.status != "DEACTIVATED")
+        available_workers = sum(1 for w in workers if w.status == "READY")
+        working_workers = sum(1 for w in workers if w.status == "WORKING")
+
+        completed_tasks = 0
+        in_progress_tasks = 0
+        pending_tasks = 0
+        for task in self.tasks_repo.list_by_organization_id(organization_id):
+            for assignment in self.worker_task_assignments_repo.list_by_task_id(task["id"]):
+                st = assignment.get("status")
+                if st == "completed":
+                    completed_tasks += 1
+                elif st == "in_progress":
+                    in_progress_tasks += 1
+                elif st == "assigned":
+                    pending_tasks += 1
+
         assistance_tickets = self.get_assistance_overview(organization_id)
         emergency_events = self.get_emergency_events(organization_id)
 
-        total_workers = len(workers)
-        active_workers = sum(1 for w in workers if w.status in ("WORKING", "READY", "ONBOARDING"))
-        available_workers = sum(1 for w in workers if w.status == "READY")
-        active_tasks = sum(1 for w in workers if w.status == "WORKING")
-        completed_tasks = sum(1 for w in workers if w.status == "COMPLETED")
-        pending_tasks = max(0, len(workflows) - active_tasks - completed_tasks)
-
-        open_assistance = sum(1 for a in assistance_tickets if a.get("status") in ("open", "acknowledged"))
-        utilization = (active_tasks / total_workers * 100.0) if total_workers > 0 else 0.0
+        open_assistance = sum(
+            1 for a in assistance_tickets
+            if a.get("status") in ("open", "acknowledged", "in_progress")
+        )
+        utilization = (
+            round((working_workers / total_workers) * 100.0, 1)
+            if total_workers > 0 else 0.0
+        )
 
         return OrganizationDashboardKPIs(
             organization_id=organization_id,
@@ -116,36 +146,37 @@ class OrganizationManagementService:
             available_workers_count=available_workers,
             supervisors_count=len(supervisors),
             departments_count=len(departments),
-            active_tasks_count=active_tasks,
+            active_tasks_count=in_progress_tasks,
             completed_tasks_count=completed_tasks,
             pending_tasks_count=pending_tasks,
             open_assistance_requests_count=open_assistance,
             emergency_events_count=len(emergency_events),
-            current_line_utilization_percent=round(utilization, 1),
+            current_line_utilization_percent=utilization,
         )
 
-    # =========================================================================
     # 2. Organization Profile & Settings (§ 6, § 28)
     # =========================================================================
 
     def get_organization_profile(self, organization_id: UUID) -> OrganizationProfileRead:
-        """Retrieve tenant profile and accessibility configurations."""
+        """Retrieve tenant profile and accessibility configurations from PostgreSQL."""
         org = self.orgs_repo.get_by_id(organization_id)
         if not org:
             raise NotFoundError("Organization not found.")
 
         now = datetime.now(timezone.utc)
+        supported = org.get("supported_languages")
+        accessibility = org.get("accessibility_defaults")
         return OrganizationProfileRead(
             id=org["id"],
             name=org["name"],
-            organization_type="industrial_manufacturing",
-            industry="Automotive & Aerospace Assembly",
-            location="Main Assembly Facility",
-            contact_email="operations@" + org["name"].lower().replace(" ", "").replace("—", "")[:12] + ".com",
+            organization_type=org.get("organization_type") or "industrial_manufacturing",
+            industry=org.get("industry") or "Automotive & Aerospace Assembly",
+            location=org.get("location") or "Main Operations Facility",
+            contact_email=org.get("contact_email"),
             status=org.get("status", "active"),
-            default_language="en",
-            supported_languages=["en", "es", "ta", "hi", "de"],
-            accessibility_defaults={
+            default_language=org.get("default_language") or "en",
+            supported_languages=list(supported) if isinstance(supported, list) else ["en", "es", "ta", "hi", "de"],
+            accessibility_defaults=dict(accessibility) if isinstance(accessibility, dict) else {
                 "default_dwell_time_ms": 500,
                 "high_contrast_default": False,
                 "min_target_size_px": 48,
@@ -161,17 +192,60 @@ class OrganizationManagementService:
         payload: OrganizationProfileUpdate,
         actor_id: UUID,
     ) -> OrganizationProfileRead:
-        """Update organization profile, emit audit log, and return updated state."""
+        """Persist every exposed profile/settings field (was audit-only for
+        everything except name, with the name update itself swallowed)."""
         org = self.orgs_repo.get_by_id(organization_id)
         if not org:
             raise NotFoundError("Organization not found.")
 
-        if payload.name:
-            # Update name if provided
-            try:
-                self.orgs_repo.update_name(organization_id, payload.name)
-            except Exception:
-                pass
+        changes = payload.model_dump(exclude_unset=True)
+        name = changes.get("name", org["name"])
+
+        if "supported_languages" in changes:
+            langs = changes["supported_languages"]
+            if not isinstance(langs, list) or not langs or not all(
+                isinstance(x, str) and x for x in langs
+            ):
+                raise ValidationError("supported_languages must be a non-empty list of language codes.")
+        if "accessibility_defaults" in changes and not isinstance(changes["accessibility_defaults"], dict):
+            raise ValidationError("accessibility_defaults must be an object.")
+        if "name" in changes and not str(name).strip():
+            raise ValidationError("Organization name cannot be empty.")
+
+        if name != org["name"]:
+            clash = self.orgs_repo.get_by_name(name)
+            if clash and clash["id"] != organization_id:
+                raise ConflictError(f"An organization named '{name}' already exists.")
+
+        try:
+            self.orgs_repo.update_profile(
+                organization_id=organization_id,
+                name=name,
+                organization_type=changes.get(
+                    "organization_type", org.get("organization_type") or "industrial_manufacturing"
+                ),
+                industry=changes.get("industry", org.get("industry") or "Automotive & Aerospace Assembly"),
+                location=changes.get("location", org.get("location") or "Main Operations Facility"),
+                contact_email=changes.get("contact_email", org.get("contact_email")),
+                default_language=changes.get("default_language", org.get("default_language") or "en"),
+                supported_languages=changes.get(
+                    "supported_languages",
+                    list(org["supported_languages"]) if isinstance(org.get("supported_languages"), list)
+                    else ["en", "es", "ta", "hi", "de"],
+                ),
+                accessibility_defaults=changes.get(
+                    "accessibility_defaults",
+                    dict(org["accessibility_defaults"]) if isinstance(org.get("accessibility_defaults"), dict)
+                    else {
+                        "default_dwell_time_ms": 500,
+                        "high_contrast_default": False,
+                        "min_target_size_px": 48,
+                        "voice_confirmation_default": False,
+                    },
+                ),
+            )
+        except errors.UniqueViolation:
+            raise ConflictError(f"An organization named '{name}' already exists.")
 
         self.audit_repo.create(
             organization_id=organization_id,
@@ -179,12 +253,11 @@ class OrganizationManagementService:
             event_type="organization.profile_updated",
             resource_type="organization",
             resource_id=organization_id,
-            event_data=payload.model_dump(exclude_unset=True),
+            event_data=changes,
         )
 
         return self.get_organization_profile(organization_id)
 
-    # =========================================================================
     # 3. Department Management (§ 7, § 8)
     # =========================================================================
 
@@ -932,126 +1005,188 @@ class OrganizationManagementService:
     # =========================================================================
 
     def get_assistance_overview(self, organization_id: UUID) -> List[Dict[str, Any]]:
-        """Organization-wide assistance activity overview."""
-        now = datetime.now(timezone.utc)
-        return [
-            {
-                "id": "70000000-0000-0000-0000-000000000001",
-                "worker_name": "Samira Chen",
-                "department_name": "Quality Control & Diagnostics",
-                "supervisor_name": "Marcus Vance",
-                "task_name": "High-Voltage Isolation Check",
-                "priority": "high",
-                "reason": "Dielectric probe calibration error on step 3.",
-                "status": "open",
-                "requested_at": now.isoformat(),
-            },
-            {
-                "id": "70000000-0000-0000-0000-000000000002",
-                "worker_name": "Alex Morgan",
-                "department_name": "Powertrain & Gearbox Integration",
-                "supervisor_name": "Marcus Vance",
-                "task_name": "Inverter Sub-Assembly Alpha",
-                "priority": "normal",
-                "reason": "Capacitor polarity marking clarification requested on Step 1.",
-                "status": "in_progress",
-                "requested_at": now.isoformat(),
-            },
-        ]
+        """Organization-wide assistance activity from assistance_requests rows."""
+        rows = self.assistance_repo.list_by_organization_id(organization_id)
+        overview: List[Dict[str, Any]] = []
+        for r in rows:
+            worker = self.workers_repo.get_by_id(r["worker_profile_id"])
+            user = self.users_repo.get_by_id(worker["user_id"]) if worker else None
+            worker_name = None
+            if user:
+                worker_name = user.get("full_name") or user.get("email")
+
+            department_name = None
+            if user:
+                link = self.user_departments_repo.get_by_user_id(user["id"])
+                if link:
+                    dept = self.depts_repo.get_by_id(link[0]["department_id"])
+                    if dept:
+                        department_name = dept["name"]
+
+            task_name = None
+            if r.get("worker_task_assignment_id"):
+                assignment = self.worker_task_assignments_repo.get_by_id(
+                    r["worker_task_assignment_id"]
+                )
+                if assignment:
+                    task = self.tasks_repo.get_by_id(assignment["task_id"])
+                    if task:
+                        task_name = task.get("name")
+
+            reason = r.get("reason") or ""
+            is_emergency = (
+                r.get("priority") == "urgent" or "emergency" in reason.lower()
+            )
+            overview.append({
+                "id": str(r["id"]),
+                "worker_name": worker_name,
+                "department_name": department_name,
+                "supervisor_name": None,  # no supervisor column exists; honest null
+                "task_name": task_name,
+                "priority": r.get("priority"),
+                "reason": reason or None,
+                "status": r.get("status"),
+                "requested_at": r["requested_at"].isoformat() if r.get("requested_at") else None,
+                "resolved_at": r["resolved_at"].isoformat() if r.get("resolved_at") else None,
+                "is_emergency": is_emergency,
+            })
+        return overview
 
     def get_emergency_events(self, organization_id: UUID) -> List[Dict[str, Any]]:
-        """Surface emergency safety halt events across the organization."""
-        return []
+        """Active emergency safety halt events from assistance_requests (urgent + open)."""
+        return [
+            e for e in self.get_assistance_overview(organization_id)
+            if e.get("is_emergency")
+            and e.get("status") in ("open", "acknowledged", "in_progress")
+        ]
 
-    # =========================================================================
     # 8. Operational & Accessibility Analytics (§ 21, § 22)
     # =========================================================================
 
     def get_organization_analytics(self, organization_id: UUID) -> OrganizationAnalyticsSummary:
-        """Provide aggregate non-medical operational and accessibility analytics."""
+        """Aggregate operational + accessibility analytics from PostgreSQL.
+
+        Previously tasks_completed_count=19, tasks_in_progress_count=3,
+        average_task_duration_minutes=8.2, workflow_completion_rate=94.5,
+        total_assistance_requests=6, average_resolution_time_minutes=1.5 and
+        emergency_stops_count=0 were hardcoded constants. Every value is now
+        computed from real rows.
+        """
         workers = self.list_workers(organization_id, page=1, page_size=500)["items"]
         total = len(workers)
-        active = sum(1 for w in workers if w.status in ("WORKING", "READY", "ONBOARDING"))
+        active = sum(1 for w in workers if w.status not in ("DEACTIVATED", "INVITED"))
 
         gesture_ready = sum(1 for w in workers if w.interaction_mode in ("gesture", "multimodal"))
         voice_ready = sum(1 for w in workers if w.interaction_mode in ("voice", "multimodal"))
         multi_ready = sum(1 for w in workers if w.interaction_mode == "multimodal")
         needing_training = sum(1 for w in workers if not w.training_completed)
 
+        # Task metrics from real assignments
+        assigned_count = 0
+        completed_count = 0
+        in_progress_count = 0
+        durations: List[float] = []
+        for task in self.tasks_repo.list_by_organization_id(organization_id):
+            for a in self.worker_task_assignments_repo.list_by_task_id(task["id"]):
+                assigned_count += 1
+                st = a.get("status")
+                if st == "completed":
+                    completed_count += 1
+                    if a.get("started_at") and a.get("completed_at"):
+                        dur = (a["completed_at"] - a["started_at"]).total_seconds() / 60.0
+                        durations.append(dur)
+                elif st in ("in_progress", "assigned", "paused"):
+                    in_progress_count += 1
+
+        avg_duration = round(sum(durations) / len(durations), 1) if durations else 0.0
+        completion_rate = (
+            round((completed_count / assigned_count) * 100.0, 1) if assigned_count else 0.0
+        )
+
+        # Assistance metrics from real rows
+        assistance_rows = self.assistance_repo.list_by_organization_id(organization_id)
+        total_assistance = len(assistance_rows)
+        resolution_times: List[float] = []
+        emergency_count = 0
+        for r in assistance_rows:
+            if r.get("resolved_at") and r.get("requested_at"):
+                delta = r["resolved_at"] - r["requested_at"]
+                resolution_times.append(delta.total_seconds() / 60.0)
+            reason = (r.get("reason") or "").lower()
+            if (
+                r.get("priority") == "urgent" or "emergency" in reason
+            ) and r.get("status") in ("open", "acknowledged", "in_progress"):
+                emergency_count += 1
+        avg_resolution = (
+            round(sum(resolution_times) / len(resolution_times), 1) if resolution_times else 0.0
+        )
+
         return OrganizationAnalyticsSummary(
             organization_id=organization_id,
             total_workers=total,
             active_workers=active,
-            tasks_completed_count=19,
-            tasks_in_progress_count=3,
-            average_task_duration_minutes=8.2,
-            workflow_completion_rate=94.5,
-            total_assistance_requests=6,
-            average_resolution_time_minutes=1.5,
-            emergency_stops_count=0,
+            tasks_completed_count=completed_count,
+            tasks_in_progress_count=in_progress_count,
+            average_task_duration_minutes=avg_duration,
+            workflow_completion_rate=completion_rate,
+            total_assistance_requests=total_assistance,
+            average_resolution_time_minutes=avg_resolution,
+            emergency_stops_count=emergency_count,
             gesture_ready_workers_count=gesture_ready,
             voice_ready_workers_count=voice_ready,
             multimodal_ready_workers_count=multi_ready,
             workers_needing_training_count=needing_training,
         )
 
-    # =========================================================================
     # 9. Immutable Audit Log Trail (§ 23)
     # =========================================================================
 
     def query_audit_logs(self, organization_id: UUID, limit: int = 50) -> List[OrganizationAuditEventItem]:
-        """Query append-only immutable audit trail for the organization."""
-        records = self.audit_repo.list_by_organization_id(organization_id, limit=limit)
+        """Query append-only immutable audit trail for the organization.
+
+        Actor names/roles are resolved from the users and user_roles tables
+        (never fabricated), and an empty trail returns an empty list instead
+        of a seeded fake stream.
+        """
+        records = self.audit_repo.list_by_organization_id(organization_id)
+        records = list(records)[: max(1, limit)]
         now = datetime.now(timezone.utc)
-        if records:
-            return [
+
+        actor_cache: Dict[Any, tuple] = {}
+
+        def _actor(uid: Any) -> tuple:
+            if uid is None:
+                return ("system", "system")
+            if uid in actor_cache:
+                return actor_cache[uid]
+            user = self.users_repo.get_by_id(uid) if uid else None
+            if user:
+                name = user.get("full_name") or user.get("email") or str(uid)
+            else:
+                name = "deleted user"
+            role = "user"
+            assignments = self.user_roles_repo.get_by_user_id(uid)
+            if assignments:
+                role_row = self.roles_repo.get_by_id(assignments[0]["role_id"])
+                if role_row:
+                    role = role_row.get("name") or "user"
+            actor_cache[uid] = (name, role)
+            return actor_cache[uid]
+
+        items: List[OrganizationAuditEventItem] = []
+        for r in records:
+            actor_name, actor_role = _actor(r.get("actor_user_id"))
+            items.append(
                 OrganizationAuditEventItem(
                     id=r["id"],
                     organization_id=r["organization_id"],
-                    actor_name="Administrator",
-                    actor_role="admin",
+                    actor_name=actor_name,
+                    actor_role=actor_role,
                     event_type=r["event_type"],
                     resource_type=r["resource_type"],
                     resource_id=r.get("resource_id"),
-                    occurred_at=r.get("occurred_at") or now,
+                    occurred_at=r.get("occurred_at") or r.get("created_at") or now,
                     event_data=r.get("event_data") or {},
                 )
-                for r in records
-            ]
-
-        # Seeded default audit stream
-        return [
-            OrganizationAuditEventItem(
-                id=UUID("a0000000-0000-0000-0000-000000000001"),
-                organization_id=organization_id,
-                actor_name="Sarah Jenkins (Admin)",
-                actor_role="admin",
-                event_type="department.created",
-                resource_type="department",
-                resource_id=UUID("11111111-1111-1111-1111-111111111111"),
-                occurred_at=now,
-                event_data={"name": "Powertrain & Gearbox Integration"},
-            ),
-            OrganizationAuditEventItem(
-                id=UUID("a0000000-0000-0000-0000-000000000002"),
-                organization_id=organization_id,
-                actor_name="Sarah Jenkins (Admin)",
-                actor_role="admin",
-                event_type="supervisor.invited",
-                resource_type="user",
-                resource_id=UUID("c0000000-0000-0000-0000-000000000002"),
-                occurred_at=now,
-                event_data={"email": "supervisor@amap.com", "full_name": "Marcus Vance"},
-            ),
-            OrganizationAuditEventItem(
-                id=UUID("a0000000-0000-0000-0000-000000000003"),
-                organization_id=organization_id,
-                actor_name="Sarah Jenkins (Admin)",
-                actor_role="admin",
-                event_type="worker.invited",
-                resource_type="worker_profile",
-                resource_id=UUID("d0000000-0000-0000-0000-000000000005"),
-                occurred_at=now,
-                event_data={"email": "maria.newhire@amap.com", "full_name": "Maria Rodriguez"},
-            ),
-        ]
+            )
+        return items

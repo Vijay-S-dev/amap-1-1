@@ -63,6 +63,8 @@ def mock_service() -> OrganizationManagementService:
     service.workers_repo.list_enterprise_directory.return_value = ([], 0)
     # invite_worker performs a real duplicate-email check before creating rows.
     service.users_repo.get_by_email.return_value = None
+    # Organization name uniqueness pre-check: no existing org by default.
+    service.orgs_repo.get_by_name.return_value = None
     now = datetime.now(timezone.utc)
     created_user_id = uuid4()
 
@@ -516,9 +518,42 @@ def test_organization_analytics_and_audit_trail(mock_service):
         assert "tasks_completed_count" in res_an.json()
         assert "gesture_ready_workers_count" in res_an.json()
 
-        # Audit Trail
+        # Audit Trail — empty repository must yield an empty list (the old
+        # implementation fabricated a "seeded default audit stream" here).
         res_aud = client.get("/api/v1/organizations/manage/audit?limit=25")
         assert res_aud.status_code == status.HTTP_200_OK
-        assert len(res_aud.json()) >= 1
+        assert res_aud.json() == []
+
+        # With a real audit row, the actor is resolved from users/roles.
+        from datetime import datetime as _dt, timezone as _tz
+        mock_service.audit_repo.list_by_organization_id.return_value = [
+            {
+                "id": ADMIN_A_ID,
+                "organization_id": ORG_A_ID,
+                "actor_user_id": ADMIN_A_ID,
+                "event_type": "department.created",
+                "resource_type": "department",
+                "resource_id": None,
+                "event_data": {"name": "Welding"},
+                "occurred_at": _dt.now(_tz.utc),
+                "created_at": _dt.now(_tz.utc),
+            }
+        ]
+        mock_service.users_repo.get_by_id.return_value = {
+            "id": ADMIN_A_ID,
+            "full_name": "Sarah Jenkins",
+            "email": "admin@amap.com",
+        }
+        mock_service.user_roles_repo.get_by_user_id.return_value = [
+            {"role_id": ADMIN_A_ID}
+        ]
+        mock_service.roles_repo.get_by_id.return_value = {"name": "admin"}
+        res_aud = client.get("/api/v1/organizations/manage/audit?limit=25")
+        assert res_aud.status_code == status.HTTP_200_OK
+        items = res_aud.json()
+        assert len(items) == 1
+        assert items[0]["actor_name"] == "Sarah Jenkins"
+        assert items[0]["actor_role"] == "admin"
+        assert items[0]["event_type"] == "department.created"
     finally:
         app.dependency_overrides.clear()
