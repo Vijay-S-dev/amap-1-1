@@ -21,7 +21,51 @@ from models.gesture import (
     LandmarkPoint,
 )
 from repositories.custom_gestures import CustomGesturesRepository
+from repositories.organizations import OrganizationsRepository
+from repositories.users import UsersRepository
+from repositories.worker_profiles import WorkerProfilesRepository
 from services.gesture_service import GestureService
+
+
+@pytest.fixture()
+def worker_context():
+    """Create a real organization with two workers (org -> users -> profiles).
+
+    Yields stable UUIDs used for PostgreSQL-backed custom gesture tests and
+    cleans all rows up afterwards.
+    """
+    organizations = OrganizationsRepository()
+    users = UsersRepository()
+    worker_profiles = WorkerProfilesRepository()
+
+    organization = organizations.create(f"gesture-test-org-{uuid4()}")
+    user_a = users.create(
+        organization["id"],
+        f"gesture-a-{uuid4()}@example.com",
+        "Gesture Worker A",
+        "test-password-hash",
+    )
+    user_b = users.create(
+        organization["id"],
+        f"gesture-b-{uuid4()}@example.com",
+        "Gesture Worker B",
+        "test-password-hash",
+    )
+    profile_a = worker_profiles.create(user_a["id"])
+    profile_b = worker_profiles.create(user_b["id"])
+
+    try:
+        yield {
+            "organization_id": organization["id"],
+            "worker_a": profile_a["id"],
+            "worker_b": profile_b["id"],
+        }
+    finally:
+        worker_profiles.delete_by_id(profile_b["id"])
+        worker_profiles.delete_by_id(profile_a["id"])
+        users.delete_by_id(user_a["id"])
+        users.delete_by_id(user_b["id"])
+        organizations.delete_by_id(organization["id"])
 
 
 def generate_mock_landmarks_with_pose(
@@ -62,12 +106,12 @@ def generate_mock_landmarks_with_pose(
     return points
 
 
-def test_custom_gesture_training_and_validation():
+def test_custom_gesture_training_and_validation(worker_context):
     """Verify that custom gesture training validates sample count, quality, and builds template."""
     repo = CustomGesturesRepository()
     service = GestureService(custom_repo=repo)
-    worker_id = uuid4()
-    org_id = uuid4()
+    worker_id = worker_context["worker_a"]
+    org_id = worker_context["organization_id"]
 
     # 1. Reject < 5 samples via Pydantic model validation
     invalid_samples = [generate_mock_landmarks_with_pose() for _ in range(3)]
@@ -98,12 +142,12 @@ def test_custom_gesture_training_and_validation():
     assert profile.stability_score >= 80.0
 
 
-def test_custom_gesture_database_persistence_and_restart():
-    """Verify that custom gesture profile is committed to the database and survives service restart."""
+def test_custom_gesture_database_persistence_and_restart(worker_context):
+    """Verify that custom gesture profile is committed to PostgreSQL and survives service restart."""
     repo = CustomGesturesRepository()
     service1 = GestureService(custom_repo=repo)
-    worker_id = uuid4()
-    org_id = uuid4()
+    worker_id = worker_context["worker_a"]
+    org_id = worker_context["organization_id"]
 
     # Train and persist
     samples = [generate_mock_landmarks_with_pose(index_tip_y=0.22, jitter=i * 0.002) for i in range(5)]
@@ -144,13 +188,13 @@ def test_custom_gesture_database_persistence_and_restart():
     assert res.action_mapping == "confirm_action"
 
 
-def test_custom_gesture_worker_isolation_and_updates():
+def test_custom_gesture_worker_isolation_and_updates(worker_context):
     """Verify that Worker A's custom gesture is isolated from Worker B, and updates replace old intent."""
     repo = CustomGesturesRepository()
     service = GestureService(custom_repo=repo)
-    worker_a = uuid4()
-    worker_b = uuid4()
-    org_id = uuid4()
+    worker_a = worker_context["worker_a"]
+    worker_b = worker_context["worker_b"]
+    org_id = worker_context["organization_id"]
 
     # Worker A saves custom CONFIRM gesture
     samples_a = [generate_mock_landmarks_with_pose(index_tip_y=0.2, jitter=i * 0.002) for i in range(5)]

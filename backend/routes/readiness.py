@@ -4,9 +4,12 @@ Worker Readiness and Onboarding Lifecycle API Routes for AMAP (§ 4, § 13, § 1
 Provides:
 - GET /workers/{id}/readiness: Evaluates whether a worker is ready based on interaction mode and completed milestones.
 - POST /workers/{id}/readiness/certify: Marks onboarding and simulated task training as certified.
+
+All state is persisted in PostgreSQL (worker_readiness, migration 042) so it
+survives backend restarts. There is no in-memory store.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import Field
@@ -14,52 +17,10 @@ from pydantic import Field
 from app.dependencies import get_current_user
 from models.auth import AuthenticatedUserContext
 from models.base import AMAPBaseModel, StrictInputModel
+from repositories.worker_profiles import WorkerProfilesRepository
+from repositories.worker_readiness import WorkerReadinessRepository
 
 router = APIRouter(prefix="/workers", tags=["Worker Readiness"])
-
-# In-memory readiness state registry (backed by worker profile UUID)
-_WORKER_READINESS_STORE: Dict[str, Dict[str, Any]] = {
-    # Alex Morgan (Certified Existing Employee)
-    "d0000000-0000-0000-0000-000000000001": {
-        "is_fresher": False,
-        "onboarding_completed": True,
-        "readiness_status": "ready",
-        "interaction_mode": "multimodal",
-        "gesture_ready": True,
-        "voice_ready": True,
-        "multimodal_ready": True,
-        "task_training_complete": True,
-        "overall_ready": True,
-        "completed_stages": ["language", "accessibility", "gesture_calibration", "voice_setup", "training"],
-        "active_preferences": {
-            "language": "en",
-            "modality": "multimodal",
-            "dwell_time_ms": 500,
-            "high_contrast": False,
-            "text_scale": 1.0,
-        },
-    },
-    # Maria Rodriguez (Fresher / New Hire)
-    "d0000000-0000-0000-0000-000000000002": {
-        "is_fresher": True,
-        "onboarding_completed": False,
-        "readiness_status": "incomplete",
-        "interaction_mode": "multimodal",
-        "gesture_ready": False,
-        "voice_ready": False,
-        "multimodal_ready": False,
-        "task_training_complete": False,
-        "overall_ready": False,
-        "completed_stages": [],
-        "active_preferences": {
-            "language": "es",
-            "modality": "multimodal",
-            "dwell_time_ms": 500,
-            "high_contrast": False,
-            "text_scale": 1.0,
-        },
-    },
-}
 
 
 class WorkerReadinessResponse(AMAPBaseModel):
@@ -109,6 +70,33 @@ def _compute_readiness(
     return task_training_complete
 
 
+def _require_worker_profile(worker_id: UUID) -> None:
+    """Raise 404 when the worker profile does not exist in PostgreSQL."""
+    profile = WorkerProfilesRepository().get_by_id(worker_id)
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Worker profile {worker_id} not found.",
+        )
+
+
+def _row_to_response(worker_id: UUID, row: Dict[str, Any]) -> WorkerReadinessResponse:
+    return WorkerReadinessResponse(
+        worker_id=worker_id,
+        is_fresher=row["is_fresher"],
+        onboarding_completed=row["onboarding_completed"],
+        readiness_status=row["readiness_status"],
+        interaction_mode=row["interaction_mode"],
+        gesture_ready=row["gesture_ready"],
+        voice_ready=row["voice_ready"],
+        multimodal_ready=row["multimodal_ready"],
+        task_training_complete=row["task_training_complete"],
+        overall_ready=row["overall_ready"],
+        completed_stages=list(row["completed_stages"] or []),
+        active_preferences=dict(row["active_preferences"] or {}),
+    )
+
+
 @router.get(
     "/{worker_id}/readiness",
     response_model=WorkerReadinessResponse,
@@ -121,46 +109,16 @@ def get_worker_readiness(
 ) -> WorkerReadinessResponse:
     """
     Check if the worker is a new hire/fresher requiring onboarding or a certified existing employee.
+    Creates and persists the default readiness record on first access.
     """
-    str_id = str(worker_id)
-    state = _WORKER_READINESS_STORE.get(str_id)
+    _require_worker_profile(worker_id)
 
-    if not state:
-        state = {
-            "is_fresher": True,
-            "onboarding_completed": False,
-            "readiness_status": "incomplete",
-            "interaction_mode": "multimodal",
-            "gesture_ready": False,
-            "voice_ready": False,
-            "multimodal_ready": False,
-            "task_training_complete": False,
-            "overall_ready": False,
-            "completed_stages": [],
-            "active_preferences": {
-                "language": "en",
-                "modality": "multimodal",
-                "dwell_time_ms": 500,
-                "high_contrast": False,
-                "text_scale": 1.0,
-            },
-        }
-        _WORKER_READINESS_STORE[str_id] = state
+    readiness_repo = WorkerReadinessRepository()
+    row = readiness_repo.get(worker_id)
+    if not row:
+        row = readiness_repo.create_default(worker_id)
 
-    return WorkerReadinessResponse(
-        worker_id=worker_id,
-        is_fresher=state.get("is_fresher", True),
-        onboarding_completed=state.get("onboarding_completed", False),
-        readiness_status=state.get("readiness_status", "incomplete"),
-        interaction_mode=state.get("interaction_mode", "multimodal"),
-        gesture_ready=state.get("gesture_ready", False),
-        voice_ready=state.get("voice_ready", False),
-        multimodal_ready=state.get("multimodal_ready", False),
-        task_training_complete=state.get("task_training_complete", False),
-        overall_ready=state.get("overall_ready", False),
-        completed_stages=state.get("completed_stages", []),
-        active_preferences=state.get("active_preferences", {}),
-    )
+    return _row_to_response(worker_id, row)
 
 
 @router.post(
@@ -175,9 +133,11 @@ def certify_worker_readiness(
     current_user: AuthenticatedUserContext = Depends(get_current_user),
 ) -> WorkerReadinessResponse:
     """
-    Mark worker onboarding as complete, calculating overall readiness based on the selected interaction mode.
+    Mark worker onboarding as complete, calculating overall readiness based on
+    the selected interaction mode. The result is persisted to PostgreSQL.
     """
-    str_id = str(worker_id)
+    _require_worker_profile(worker_id)
+
     overall_ready = _compute_readiness(
         interaction_mode=payload.selected_modality,
         gesture_ready=payload.gesture_ready,
@@ -212,19 +172,6 @@ def certify_worker_readiness(
             "training_order": payload.training_order_id,
         },
     }
-    _WORKER_READINESS_STORE[str_id] = state
 
-    return WorkerReadinessResponse(
-        worker_id=worker_id,
-        is_fresher=state["is_fresher"],
-        onboarding_completed=state["onboarding_completed"],
-        readiness_status=state["readiness_status"],
-        interaction_mode=state["interaction_mode"],
-        gesture_ready=state["gesture_ready"],
-        voice_ready=state["voice_ready"],
-        multimodal_ready=state["multimodal_ready"],
-        task_training_complete=state["task_training_complete"],
-        overall_ready=state["overall_ready"],
-        completed_stages=state["completed_stages"],
-        active_preferences=state["active_preferences"],
-    )
+    row = WorkerReadinessRepository().upsert(worker_id, state)
+    return _row_to_response(worker_id, row)

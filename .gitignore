@@ -28,3 +28,6 @@ __pycache__/
 .pytest_cache/
 backend/.pytest_cache/
 .mypy_cache/
+
+# Local SQLite state (removed from VCS; PostgreSQL is authoritative)
+backend/data/

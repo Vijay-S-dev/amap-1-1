@@ -101,10 +101,17 @@ class WorkSessionsRepository:
                 cursor.execute(
                     """
                     INSERT INTO work_sessions (
+                        organization_id,
                         worker_profile_id,
                         status
                     )
-                    VALUES (%s, %s)
+                    SELECT
+                        u.organization_id,
+                        %s,
+                        %s
+                    FROM worker_profiles wp
+                    JOIN users u ON u.id = wp.user_id
+                    WHERE wp.id = %s
                     RETURNING
                         id,
                         worker_profile_id,
@@ -117,11 +124,17 @@ class WorkSessionsRepository:
                     (
                         worker_profile_id,
                         status,
+                        worker_profile_id,
                     ),
                 )
 
                 work_session = cursor.fetchone()
                 connection.commit()
+
+                if work_session is None:
+                    raise ValueError(
+                        f"Cannot start work session: worker profile {worker_profile_id} does not exist."
+                    )
 
                 return work_session
 

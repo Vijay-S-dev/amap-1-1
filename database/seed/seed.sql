@@ -110,9 +110,9 @@ VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- 12. Active Work Session & Open Assistance Ticket
-INSERT INTO work_sessions (id, worker_profile_id, status, started_at)
+INSERT INTO work_sessions (id, organization_id, worker_profile_id, status, started_at)
 VALUES
-    ('90000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', 'active', CURRENT_TIMESTAMP)
+    ('90000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'd0000000-0000-0000-0000-000000000001', 'active', CURRENT_TIMESTAMP)
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO assistance_requests (id, organization_id, worker_profile_id, status, priority, reason)
@@ -153,3 +153,26 @@ INSERT INTO workflow_assignments (id, workflow_id, worker_profile_id, status)
 VALUES
     ('60000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', 'assigned')
 ON CONFLICT (id) DO NOTHING;
+
+-- 16. Worker Readiness (persisted onboarding lifecycle state)
+INSERT INTO worker_readiness (
+    worker_profile_id, is_fresher, onboarding_completed, readiness_status,
+    interaction_mode, gesture_ready, voice_ready, multimodal_ready,
+    task_training_complete, overall_ready, completed_stages, active_preferences
+)
+VALUES
+    (
+        'd0000000-0000-0000-0000-000000000001', FALSE, TRUE, 'ready',
+        'multimodal', TRUE, TRUE, TRUE,
+        TRUE, TRUE,
+        '["language", "accessibility", "gesture_calibration", "voice_setup", "training"]'::jsonb,
+        '{"language": "en", "modality": "multimodal", "dwell_time_ms": 500, "high_contrast": false, "text_scale": 1.0}'::jsonb
+    ),
+    (
+        'd0000000-0000-0000-0000-000000000002', TRUE, FALSE, 'incomplete',
+        'multimodal', FALSE, FALSE, FALSE,
+        FALSE, FALSE,
+        '[]'::jsonb,
+        '{"language": "en", "modality": "multimodal", "dwell_time_ms": 500, "high_contrast": false, "text_scale": 1.0}'::jsonb
+    )
+ON CONFLICT (worker_profile_id) DO NOTHING;
