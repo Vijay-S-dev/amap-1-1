@@ -240,14 +240,17 @@ def main() -> int:
 
     # 11. task assignment & execution lifecycle -> task_results in PostgreSQL
     st_tasks, sup_tasks = call("GET", "/api/v1/supervisor/tasks", supervisor_token)
-    if st_tasks == 200 and isinstance(sup_tasks, list) and len(sup_tasks) > 0 and len(sup_workers) > 0:
+    if st_tasks == 200 and isinstance(sup_tasks, list) and len(sup_tasks) > 0 and isinstance(sup_workers, list) and len(sup_workers) > 0:
         task_id = sup_tasks[0]["id"]
-        worker_id = sup_workers[0]["worker_profile_id"]
+        alex_worker_id = next(
+            (w["worker_profile_id"] for w in sup_workers if w.get("email") == WORKER),
+            "d0000000-0000-0000-0000-000000000001",
+        )
         st_assign, new_assign = call(
             "POST",
             "/api/v1/supervisor/tasks/assign",
             supervisor_token,
-            {"task_id": task_id, "worker_profile_id": worker_id},
+            {"task_id": task_id, "worker_profile_id": alex_worker_id},
         )
         check("task assigned by supervisor", st_assign == 201 and bool(new_assign and "id" in new_assign), f"{st_assign} {new_assign}")
         assignment_id = new_assign.get("id") if isinstance(new_assign, dict) else None
