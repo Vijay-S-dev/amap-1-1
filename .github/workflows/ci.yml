@@ -1,0 +1,163 @@
+# ====================================================================
+# AMAP CI — runs from a clean checkout on every push / PR.
+# Gates (all must pass; each one fails the run on broken code):
+#   1. migrations 001..051 on a fresh PostgreSQL 16
+#   2. seed
+#   3. complete backend test suite (zero failures / zero collection
+#      errors / zero skips — the Whisper model is prefetched so the
+#      real STT tests execute)
+#   4. frontend: npm ci + typecheck + production build
+#   5. critical end-to-end over real HTTP + PostgreSQL assertions
+#   6. docker compose build + up + readiness/login/API checks
+# ====================================================================
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend:
+    name: Migrations, seed, backend tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: amap
+          POSTGRES_USER: amap_user
+          POSTGRES_PASSWORD: amap_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U amap_user -d amap"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://amap_user:amap_password@localhost:5432/amap
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Cache Whisper model (real STT tests must not skip)
+        uses: actions/cache@v4
+        with:
+          path: backend/.whisper_cache
+          key: whisper-tiny-v1-${{ hashFiles('scripts/prefetch_whisper_model.py') }}
+
+      - name: Install backend dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Apply migrations (001..051)
+        run: python scripts/migrate.py
+
+      - name: Seed
+        run: python scripts/seed.py
+
+      - name: Prefetch local Whisper model (EN + HI)
+        run: python scripts/prefetch_whisper_model.py
+
+      - name: Backend test suite
+        working-directory: backend
+        run: python -m pytest -q
+
+      - name: Critical E2E over real HTTP + PostgreSQL
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 \
+            --app-dir backend > /tmp/uvicorn.log 2>&1 &
+          echo $! > /tmp/uvicorn.pid
+          for i in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:8000/api/v1/health && break
+            sleep 1
+          done
+          python scripts/ci_e2e.py
+          kill "$(cat /tmp/uvicorn.pid)" || true
+
+  frontend:
+    name: Typecheck + production build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install (clean dependency state)
+        working-directory: frontend
+        run: npm ci
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+
+      - name: MediaPipe gesture assets generated
+        working-directory: frontend
+        run: |
+          test -f public/mediapipe/hand_landmarker.task
+          test -d public/mediapipe/wasm
+
+  docker:
+    name: docker compose build + up + readiness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prefetch local Whisper model
+        run: python3 scripts/prefetch_whisper_model.py
+
+      - name: docker compose build
+        run: docker compose build --pull
+
+      - name: docker compose up
+        run: docker compose up -d
+
+      - name: Wait for backend + frontend readiness
+        run: |
+          for i in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8000/api/v1/health >/dev/null 2>&1 \
+               && curl -fsS http://127.0.0.1:3000 >/dev/null 2>&1; then
+              echo "stack ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "stack did not become ready in time"
+          docker compose logs
+          exit 1
+
+      - name: Login + fusion + executed action inside the stack
+        run: |
+          TOKEN=$(curl -fsS -X POST http://127.0.0.1:8000/api/v1/auth/login \
+            -H 'Content-Type: application/json' \
+            -d '{"organization_id":"9a61e05d-7a32-4112-9c17-1833d7b42f65","email":"alex.worker@amap.com","password":"SecurePassword123!"}' \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')
+          curl -fsS -X POST http://127.0.0.1:8000/api/v1/multimodal/fuse \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d '{"inputs":[{"mode":"gesture","raw_intent":"thumbs_up","confidence":0.92,"timestamp_ms":1700000000000}],"temporal_window_ms":1500}' \
+            | python3 -c 'import sys,json; b=json.load(sys.stdin); assert b["fused_action"]=="confirm_action", b; print("fusion ok")'
+          curl -fsS -X POST http://127.0.0.1:8000/api/v1/actions/execute \
+            -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+            -d '{"action_name":"confirm_action","parameters":{"source":"ci-compose"}}' \
+            | python3 -c 'import sys,json; b=json.load(sys.stdin); assert b.get("success") is True, b; print("execute ok")'
+          curl -fsS http://127.0.0.1:3000/mediapipe/hand_landmarker.task -o /dev/null
+          echo "gesture assets served"
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

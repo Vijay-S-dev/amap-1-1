@@ -34,6 +34,10 @@ COPY --from=builder /root/.local /home/amapuser/.local
 COPY --chown=amapuser:amapuser backend /app/backend
 COPY --chown=amapuser:amapuser ai /app/ai
 
+# Migration runner + seed + migration/seed SQL (used by the migrate service)
+COPY --chown=amapuser:amapuser scripts /app/scripts
+COPY --chown=amapuser:amapuser database /app/database
+
 ENV PATH=/home/amapuser/.local/bin:$PATH \
     PYTHONPATH=/app/backend:/app \
     PYTHONUNBUFFERED=1 \

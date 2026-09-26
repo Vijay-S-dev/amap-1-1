@@ -11,8 +11,11 @@ services:
       - "5432:5432"
     volumes:
       - amap_dev_postgres_data:/var/lib/postgresql/data
-      - ../../database/schema/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
-      - ../../database/seed/seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
+    # Schema is applied by the migration runner (database/migrations 001..051)
+    # + seed, never by the consolidated schema.sql snapshot (it only covers
+    # migrations 001-040). From the repo root run:
+    #   DATABASE_URL=postgresql://amap_user:change_me@localhost:5432/amap \
+    #     python scripts/migrate.py && python scripts/seed.py
 
   redis:
     image: redis:7-alpine
