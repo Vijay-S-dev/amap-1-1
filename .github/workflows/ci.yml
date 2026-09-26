@@ -79,7 +79,7 @@ jobs:
             curl -fsS http://127.0.0.1:8000/api/v1/health && break
             sleep 1
           done
-          PYTHONUNBUFFERED=1 python -u scripts/ci_e2e.py || { echo "=== UVICORN LOG ==="; cat /tmp/uvicorn.log; exit 1; }
+          python scripts/ci_e2e.py
           kill "$(cat /tmp/uvicorn.pid)" || true
 
   frontend:

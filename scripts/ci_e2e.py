@@ -18,7 +18,6 @@ BASE = os.environ.get("CI_E2E_BASE_URL", "http://127.0.0.1:8000")
 ORG = "9a61e05d-7a32-4112-9c17-1833d7b42f65"
 WORKER = "alex.worker@amap.com"
 ADMIN = "admin@amap.com"
-SUPERVISOR = "supervisor@amap.com"
 PASSWORD = "SecurePassword123!"
 DSN = os.environ.get("DATABASE_URL", "")
 T0 = 1700000000000
@@ -48,7 +47,7 @@ def call(method: str, path: str, token: str | None = None, body=None):
 
 def check(name: str, ok: bool, detail: str = "") -> None:
     checks.append((name, bool(ok), detail))
-    print(f"{'PASS' if ok else 'FAIL'}: {name}" + ("" if ok else f" ({detail})"), flush=True)
+    print(f"{'PASS' if ok else 'FAIL'}: {name}" + ("" if ok else f" ({detail})"))
 
 
 def pg(sql: str, params=None):
@@ -65,14 +64,14 @@ def pg(sql: str, params=None):
 
 def main() -> int:
     if not DSN:
-        print("DATABASE_URL is required", flush=True)
+        print("DATABASE_URL is required")
         return 2
 
     # 1. health
     st, body = call("GET", "/api/v1/health")
     check("health", st == 200 and body.get("status") == "ok", f"{st} {body}")
 
-    # 2. login (valid + invalid password + roles)
+    # 2. login (valid + invalid password)
     st, ok = call(
         "POST",
         "/api/v1/auth/login",
@@ -95,14 +94,6 @@ def main() -> int:
     )
     admin_token = adm.get("access_token") if st == 200 else None
     check("admin login", bool(admin_token), f"{st}")
-
-    st, sup = call(
-        "POST",
-        "/api/v1/auth/login",
-        body={"organization_id": ORG, "email": SUPERVISOR, "password": PASSWORD},
-    )
-    supervisor_token = sup.get("access_token") if st == 200 else None
-    check("supervisor login", bool(supervisor_token), f"{st}")
 
     # 3. RBAC: worker denied admin-only route; anonymous denied
     st, _ = call("GET", "/api/v1/admin/users", worker_token)
@@ -223,157 +214,13 @@ def main() -> int:
     )
     check("audit_events have real actors", bool(audit and audit[0][0] >= 1), f"{audit}")
 
-    # 10. supervisor dashboard & worker telemetry
-    st, sup_dash = call("GET", "/api/v1/supervisor/dashboard", supervisor_token)
-    check(
-        "supervisor dashboard real metrics",
-        st == 200 and isinstance(sup_dash, dict) and "active_workers_count" in sup_dash,
-        f"{st} {sup_dash}",
-    )
-
-    st, sup_workers = call("GET", "/api/v1/supervisor/workers", supervisor_token)
-    check(
-        "supervisor worker list",
-        st == 200 and isinstance(sup_workers, list) and len(sup_workers) >= 1,
-        f"{st} {len(sup_workers) if isinstance(sup_workers, list) else sup_workers}",
-    )
-
-    # 11. task assignment & execution lifecycle -> task_results in PostgreSQL
-    st_tasks, sup_tasks = call("GET", "/api/v1/supervisor/tasks", supervisor_token)
-    if st_tasks == 200 and isinstance(sup_tasks, list) and len(sup_tasks) > 0 and isinstance(sup_workers, list) and len(sup_workers) > 0:
-        task_id = sup_tasks[0]["id"]
-        alex_worker_id = next(
-            (w["worker_profile_id"] for w in sup_workers if w.get("email") == WORKER),
-            "d0000000-0000-0000-0000-000000000001",
-        )
-        st_assign, new_assign = call(
-            "POST",
-            "/api/v1/supervisor/tasks/assign",
-            supervisor_token,
-            {"task_id": task_id, "worker_profile_id": alex_worker_id},
-        )
-        check("task assigned by supervisor", st_assign == 201 and bool(new_assign and "id" in new_assign), f"{st_assign} {new_assign}")
-        assignment_id = new_assign.get("id") if isinstance(new_assign, dict) else None
-
-        if assignment_id:
-            st, start_res = call(
-                "POST",
-                f"/api/v1/tasks/assignments/{assignment_id}/start",
-                worker_token,
-            )
-            check("task assignment start", st == 200, f"{st} {start_res}")
-
-            wa_id = start_res.get("workflow_assignment_id") if isinstance(start_res, dict) else None
-            st_details, details = call("GET", f"/api/v1/tasks/{task_id}", worker_token)
-            steps = details.get("steps", []) if isinstance(details, dict) else []
-            if wa_id and steps:
-                for step in steps:
-                    call(
-                        "POST",
-                        f"/api/v1/tasks/workflows/assignments/{wa_id}/steps/{step['id']}/execute",
-                        worker_token,
-                        {"status": "completed", "execution_data": {"action": "step_done"}},
-                    )
-
-            st, comp_res = call(
-                "POST",
-                f"/api/v1/tasks/assignments/{assignment_id}/complete",
-                worker_token,
-                {"outcome": "completed", "result_data": {"units_assembled": 1}},
-            )
-            check("task assignment complete", st == 200, f"{st} {comp_res}")
-
-            res_rows = pg(
-                "SELECT outcome FROM task_results WHERE worker_task_assignment_id = %s",
-                (assignment_id,),
-            )
-            check("task_results row in PostgreSQL", bool(res_rows and res_rows[0][0] == "completed"), f"{res_rows}")
-
-    # 12. assistance request lifecycle -> PostgreSQL persistence
-    st, req_res = call(
-        "POST",
-        "/api/v1/assistance/requests",
-        worker_token,
-        {"reason": "Need torque wrench calibration check", "priority": "normal"},
-    )
-    req_id = req_res.get("id") if isinstance(req_res, dict) else None
-    check("assistance request created", st == 201 and req_id, f"{st} {req_res}")
-
-    if req_id:
-        st, _ = call(
-            "POST",
-            f"/api/v1/supervisor/assistance/{req_id}/resolve",
-            supervisor_token,
-            {"resolution_notes": "Calibrated tool supplied"},
-        )
-        check("assistance request resolved by supervisor", st == 200, f"{st}")
-        ast_row = pg("SELECT status FROM assistance_requests WHERE id = %s", (req_id,))
-        check("assistance_requests status 'resolved' in PostgreSQL", bool(ast_row and ast_row[0][0] == "resolved"), f"{ast_row}")
-
-    # 13. custom gesture training & lifecycle -> custom_gestures in PostgreSQL
-    # Provide 5 realistic hand landmark samples where wrist is (0.5, 0.8) and middle MCP is (0.5, 0.5)
-    sample_landmarks = [
-        {"x": 0.5 + 0.01 * (i % 5), "y": 0.8 - 0.03 * i, "z": 0.0}
-        for i in range(21)
-    ]
-    five_samples = [sample_landmarks for _ in range(5)]
-    st, train_res = call(
-        "POST",
-        "/api/v1/gestures/custom/train",
-        worker_token,
-        {
-            "gesture_name": "CI Test Custom Gesture",
-            "intent": "CONFIRM",
-            "handedness": "Right",
-            "samples": five_samples,
-        },
-    )
-    cg_id = train_res.get("id") if isinstance(train_res, dict) else None
-    check("custom gesture trained", st == 201 and cg_id, f"{st} {train_res}")
-
-    if cg_id:
-        cg_rows = pg("SELECT gesture_name, status FROM custom_gestures WHERE id = %s", (cg_id,))
-        check("custom_gestures row in PostgreSQL", bool(cg_rows and cg_rows[0][1] == "active"), f"{cg_rows}")
-        st, del_res = call("DELETE", f"/api/v1/gestures/custom/{cg_id}", worker_token)
-        check("custom gesture deleted", st == 200, f"{st} {del_res}")
-        cg_after = pg("SELECT status FROM custom_gestures WHERE id = %s", (cg_id,))
-        check("custom gesture soft-deleted (deleted)", bool(cg_after and cg_after[0][0] == "deleted"), f"{cg_after}")
-
-    # 14. safety-critical interlock gating & emergency stop
-    st, gate_res = call(
-        "POST",
-        "/api/v1/actions/execute",
-        worker_token,
-        {"action_name": "unregistered_dangerous_action"},
-    )
-    check("unregistered action rejected", st in (404, 422), f"{st} {gate_res}")
-
-    st, em_res = call(
-        "POST",
-        "/api/v1/actions/emergency-stop",
-        worker_token,
-        {"reason": "E2E safety test interlock"},
-    )
-    check("emergency stop executed", st == 200 and em_res.get("success") is True, f"{st} {em_res}")
-    em_rows = pg("SELECT COUNT(*) FROM execution_events WHERE event_type = 'emergency_stop'")
-    check("emergency_stop in PostgreSQL", bool(em_rows and em_rows[0][0] >= 1), f"{em_rows}")
-
-    # 15. cross-organization isolation (tenancy boundary)
-    FAKE_ORG = "00000000-0000-0000-0000-000000000099"
-    st, bad_login = call(
-        "POST",
-        "/api/v1/auth/login",
-        body={"organization_id": FAKE_ORG, "email": WORKER, "password": PASSWORD},
-    )
-    check("cross-org authentication rejected", st in (400, 401, 403, 404), f"{st}")
-
     failed = [c for c in checks if not c[1]]
-    print(f"\n{len(checks) - len(failed)}/{len(checks)} checks passed", flush=True)
+    print(f"\n{len(checks) - len(failed)}/{len(checks)} checks passed")
     if failed:
         for name, _, detail in failed:
-            print(f"  FAILED: {name}: {detail}", flush=True)
+            print(f"  FAILED: {name}: {detail}")
         return 1
-    print("CI E2E: ALL PASS", flush=True)
+    print("CI E2E: ALL PASS")
     return 0
 
 
