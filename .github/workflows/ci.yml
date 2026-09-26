@@ -143,6 +143,7 @@ jobs:
               tail -150 /tmp/compose-build.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
+            grep -iE "error|failed" /tmp/compose-build.log | head -20 | tr '\n' ' ' | head -c 3000 | sed 's/^/docker build errors: /' | sed 's/^/::error title=docker compose build::/'
             exit 1
           fi
 
