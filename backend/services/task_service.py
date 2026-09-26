@@ -88,12 +88,21 @@ class TaskService:
             completed_at=None,
         ))
 
-        # Legitimate write lifecycle: Ensure workflow_assignment exists and is in_progress
+        # Legitimate write lifecycle: ensure an ACTIVE workflow assignment
+        # exists for this task cycle. A completed/cancelled workflow
+        # assignment belongs to a previous cycle and must NOT be re-animated.
         tw_links = self.task_workflows_repo.list_by_task_id(assignment["task_id"])
         if tw_links:
             target_wf_id = tw_links[0]["workflow_id"]
             wf_assignments = self.workflow_assignments_repo.list_by_worker_profile_id(worker_profile_id)
-            existing_wf = next((wa for wa in wf_assignments if wa["workflow_id"] == target_wf_id), None)
+            existing_wf = next(
+                (
+                    wa for wa in wf_assignments
+                    if wa["workflow_id"] == target_wf_id
+                    and wa.get("status") in ("assigned", "in_progress", "paused")
+                ),
+                None,
+            )
             if existing_wf:
                 if existing_wf.get("status") != "in_progress":
                     self.workflow_assignments_repo.update_status(
@@ -145,7 +154,16 @@ class TaskService:
             total_steps = len(wf_steps)
             if total_steps > 0:
                 wf_assignments = self.workflow_assignments_repo.list_by_worker_profile_id(worker_profile_id)
-                wf_assign = next((wa for wa in wf_assignments if wa["workflow_id"] == target_wf_id), None)
+                # Count executions of the CURRENT cycle's active workflow
+                # assignment only — a completed one belongs to a previous run.
+                wf_assign = next(
+                    (
+                        wa for wa in wf_assignments
+                        if wa["workflow_id"] == target_wf_id
+                        and wa.get("status") in ("assigned", "in_progress", "paused")
+                    ),
+                    None,
+                )
                 if wf_assign:
                     execs = self.step_executions_repo.list_by_workflow_assignment_id(wf_assign["id"])
                     completed_step_ids = {
@@ -281,8 +299,8 @@ class TaskService:
                 {
                     "id": str(s["id"]),
                     "stepNumber": s.get("step_order", idx + 1),
-                    "title": s.get("title", f"Step {idx + 1}"),
-                    "instructionText": s.get("instruction", ""),
+                    "title": s.get("name") or s.get("title") or f"Step {idx + 1}",
+                    "instructionText": s.get("description") or s.get("instruction") or "",
                     "isSafetyCritical": s.get("is_safety_critical", False),
                     "spatialTargetId": s.get("spatial_target_id") if "spatial_target_id" in s else None,
                 }
@@ -324,21 +342,14 @@ class TaskService:
         if assignment["worker_profile_id"] != worker_profile_id:
             raise UnauthorizedError("Workflow assignment does not belong to this worker.")
 
-        # MUST FIX #3: Reject step execution if workflow assignment is in a terminal state
+        # Terminal-state gate on the workflow assignment itself. Parent task
+        # assignments are synchronized to terminal states together with the
+        # workflow assignment on completion, so this check is authoritative
+        # (a previous cycle's completed parent must not block a new cycle).
         if assignment.get("status") in ("completed", "cancelled"):
             raise ConflictError(
                 f"Cannot record step execution on {assignment['status']} workflow assignment."
             )
-
-        # Also verify linked parent worker task assignment is not cancelled/completed
-        worker_assignments = self.task_assignments_repo.list_by_worker_profile_id(worker_profile_id)
-        for wa in worker_assignments:
-            tw_links = self.task_workflows_repo.list_by_task_id(wa["task_id"])
-            if any(l.get("workflow_id") == assignment["workflow_id"] for l in tw_links):
-                if wa.get("status") in ("completed", "cancelled"):
-                    raise ConflictError(
-                        f"Cannot record step execution: parent task assignment is {wa['status']}."
-                    )
 
         step = self.workflow_steps_repo.get_by_id(workflow_step_id)
         if not step or step["workflow_id"] != assignment["workflow_id"]:
@@ -364,7 +375,7 @@ class TaskService:
                     if p_step["id"] not in completed_step_ids:
                         raise ConflictError(
                             f"Step order violation: preceding Step {p_step.get('step_order', 1)} "
-                            f"('{p_step.get('title')}') has not been completed."
+                            f"('{p_step.get('name') or p_step.get('title')}') has not been completed."
                         )
 
         now = datetime.now(timezone.utc)

@@ -109,6 +109,13 @@ def test_supervisor_service_dashboard_summary_unit():
     mock_wf_steps_repo = MagicMock()
     mock_workflows_repo = MagicMock()
     mock_interaction_configs_repo = MagicMock()
+    mock_readiness_repo = MagicMock()
+    mock_readiness_repo.get.return_value = None
+    mock_task_workflows_repo = MagicMock()
+    mock_task_workflows_repo.list_by_task_id.return_value = []
+    mock_step_execs_repo = MagicMock()
+    mock_step_execs_repo.list_by_workflow_assignment_id.return_value = []
+    mock_task_results_repo = MagicMock()
 
     service = SupervisorService(
         users_repo=mock_users_repo,
@@ -123,6 +130,10 @@ def test_supervisor_service_dashboard_summary_unit():
         workflow_steps_repo=mock_wf_steps_repo,
         workflows_repo=mock_workflows_repo,
         interaction_configs_repo=mock_interaction_configs_repo,
+        worker_readiness_repo=mock_readiness_repo,
+        task_workflows_repo=mock_task_workflows_repo,
+        step_executions_repo=mock_step_execs_repo,
+        task_results_repo=mock_task_results_repo,
     )
 
     org_id = uuid4()
