@@ -252,17 +252,19 @@ class MultimodalService:
             for item in valid_items
         })
 
-        has_voice_command = any(
-            (item.mode == InteractionMode.VOICE or str(getattr(item.mode, "value", item.mode)) == "voice")
-            and _resolve_candidate_action(item)[0] is not None
-            for item in valid_items
-        )
-
         for item in valid_items:
             action, is_spatial = _resolve_candidate_action(item)
-            # If pointing is accompanied by a voice command, pointing acts as spatial binding
-            if item.raw_intent.lower().strip() in {"pointing", "point"} and has_voice_command and not is_spatial:
-                action, is_spatial = "point_focus", True
+            # If pointing is accompanied by an operational voice command other than next_step (e.g. confirm_action),
+            # pointing acts as spatial target binding
+            if item.raw_intent.lower().strip() in {"pointing", "point"} and not is_spatial:
+                other_voice_actions = [
+                    _resolve_candidate_action(other)[0]
+                    for other in valid_items
+                    if other != item and (other.mode == InteractionMode.VOICE or str(getattr(other.mode, "value", other.mode)) == "voice")
+                ]
+                if other_voice_actions and any(va is not None and va != "next_step" for va in other_voice_actions):
+                    action, is_spatial = "point_focus", True
+
             if is_spatial and item.context_data:
                 spatial_targets.update(item.context_data)
             resolved_actions.append((action, item.confidence, item))
