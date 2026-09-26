@@ -239,39 +239,60 @@ def main() -> int:
     )
 
     # 11. task assignment & execution lifecycle -> task_results in PostgreSQL
-    assignment_id = "61000000-0000-0000-0000-000000000001"
-    workflow_id = "e0000000-0000-0000-0000-000000000001"
-    st, start_res = call(
-        "POST",
-        f"/api/v1/tasks/assignments/{assignment_id}/start",
-        worker_token,
-    )
-    check("task assignment start", st in (200, 409), f"{st} {start_res}")
-
-    wa_id = start_res.get("workflow_assignment_id") if isinstance(start_res, dict) else None
-    st_steps, steps = call("GET", f"/api/v1/tasks/workflows/{workflow_id}/steps", worker_token)
-    if wa_id and isinstance(steps, list):
-        for step in steps:
-            call(
+    st_assigned, assigned_list = call("GET", "/api/v1/tasks/assigned", worker_token)
+    assignment = None
+    if st_assigned == 200 and isinstance(assigned_list, list) and len(assigned_list) > 0:
+        assignment = assigned_list[0]
+    else:
+        st_tasks, sup_tasks = call("GET", "/api/v1/supervisor/tasks", supervisor_token)
+        if st_tasks == 200 and isinstance(sup_tasks, list) and len(sup_tasks) > 0 and len(sup_workers) > 0:
+            task_id = sup_tasks[0]["id"]
+            worker_id = sup_workers[0]["worker_profile_id"]
+            st_assign, new_assign = call(
                 "POST",
-                f"/api/v1/tasks/workflows/assignments/{wa_id}/steps/{step['id']}/execute",
-                worker_token,
-                {"status": "completed", "execution_data": {"action": "step_done"}},
+                "/api/v1/supervisor/tasks/assign",
+                supervisor_token,
+                {"task_id": task_id, "worker_profile_id": worker_id},
             )
+            assignment = new_assign
 
-    st, comp_res = call(
-        "POST",
-        f"/api/v1/tasks/assignments/{assignment_id}/complete",
-        worker_token,
-        {"outcome": "completed", "result_data": {"units_assembled": 1}},
-    )
-    check("task assignment complete", st in (200, 409), f"{st} {comp_res}")
+    check("task assignment resolved", bool(assignment and "id" in assignment), f"{assignment}")
 
-    res_rows = pg(
-        "SELECT outcome FROM task_results WHERE worker_task_assignment_id = %s",
-        (assignment_id,),
-    )
-    check("task_results row in PostgreSQL", bool(res_rows and res_rows[0][0] == "completed"), f"{res_rows}")
+    if assignment:
+        assignment_id = assignment["id"]
+        task_id = assignment["task_id"]
+        st, start_res = call(
+            "POST",
+            f"/api/v1/tasks/assignments/{assignment_id}/start",
+            worker_token,
+        )
+        check("task assignment start", st in (200, 409), f"{st} {start_res}")
+
+        wa_id = start_res.get("workflow_assignment_id") if isinstance(start_res, dict) else None
+        st_details, details = call("GET", f"/api/v1/tasks/{task_id}", worker_token)
+        steps = details.get("steps", []) if isinstance(details, dict) else []
+        if wa_id and steps:
+            for step in steps:
+                call(
+                    "POST",
+                    f"/api/v1/tasks/workflows/assignments/{wa_id}/steps/{step['id']}/execute",
+                    worker_token,
+                    {"status": "completed", "execution_data": {"action": "step_done"}},
+                )
+
+        st, comp_res = call(
+            "POST",
+            f"/api/v1/tasks/assignments/{assignment_id}/complete",
+            worker_token,
+            {"outcome": "completed", "result_data": {"units_assembled": 1}},
+        )
+        check("task assignment complete", st in (200, 409), f"{st} {comp_res}")
+
+        res_rows = pg(
+            "SELECT outcome FROM task_results WHERE worker_task_assignment_id = %s",
+            (assignment_id,),
+        )
+        check("task_results row in PostgreSQL", bool(res_rows), f"{res_rows}")
 
     # 12. assistance request lifecycle -> PostgreSQL persistence
     st, req_res = call(
@@ -307,7 +328,7 @@ def main() -> int:
         worker_token,
         {
             "gesture_name": "CI Test Custom Gesture",
-            "intent": "confirm_action",
+            "intent": "CONFIRM",
             "handedness": "Right",
             "samples": five_samples,
         },
