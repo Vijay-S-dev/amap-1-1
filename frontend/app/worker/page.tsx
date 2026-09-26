@@ -742,6 +742,7 @@ export default function WorkerPage() {
 
           <MultimodalHUD
             onActionTriggered={handleActionTriggered}
+            workSessionId={session?.id || null}
             dwellTimeMs={500}
             isEmergencyStopped={isEmergencyStopped}
           />

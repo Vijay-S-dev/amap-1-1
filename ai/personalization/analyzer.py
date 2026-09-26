@@ -5,7 +5,7 @@ Multi-Signal Interaction Difficulty Analyzer for Ergonomic & Motor Diversity Ada
 from collections import deque
 from dataclasses import dataclass, field
 import time
-from typing import Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional
 
 from ai.config import ADAPTATION_SLIDING_WINDOW_SIZE
 

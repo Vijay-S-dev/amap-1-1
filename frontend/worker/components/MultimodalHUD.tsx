@@ -34,12 +34,15 @@ interface MultimodalHUDProps {
   ) => void;
   dwellTimeMs?: number;
   isEmergencyStopped?: boolean;
+  /** Active work session id (server-side) included in fusion payloads. */
+  workSessionId?: string | null;
 }
 
 export function MultimodalHUD({
   onActionTriggered,
   dwellTimeMs = 500,
   isEmergencyStopped = false,
+  workSessionId = null,
 }: MultimodalHUDProps) {
   const { language, modality, setModality, announce, playAudioCue } = useAccessibility();
 
@@ -205,9 +208,16 @@ export function MultimodalHUD({
                     raw_intent: res.action_mapping.toLowerCase(),
                     confidence: res.confidence,
                     timestamp_ms: now,
+                    context_data: {
+                      gesture: res.detected_gesture,
+                      custom_gesture_id: res.custom_gesture_id,
+                      source: 'server-custom-gesture',
+                    },
                   },
                 ],
                 temporal_window_ms: 1500,
+                work_session_id: workSessionId || null,
+                client_context: { source: 'multimodal-hud', modality, language },
               })
               .then((fused) => processFusedMultimodalCandidate(fused, res.detected_gesture || undefined))
               .catch((err: any) =>
@@ -244,6 +254,11 @@ export function MultimodalHUD({
         raw_intent: gesture.toLowerCase(),
         confidence: conf,
         timestamp_ms: now,
+        context_data: {
+          gesture,
+          dwell_time_ms: dwellTimeMs,
+          source: 'hand-landmarker',
+        },
       },
     ];
 
@@ -264,6 +279,8 @@ export function MultimodalHUD({
       const fusedResult = await api.processMultimodalIntent({
         inputs,
         temporal_window_ms: 1500,
+        work_session_id: workSessionId || null,
+        client_context: { source: 'multimodal-hud', modality, language },
       });
       await processFusedMultimodalCandidate(fusedResult, gesture);
     } catch (err: any) {
@@ -307,10 +324,18 @@ export function MultimodalHUD({
       const action = command.action_mapping;
       const displayCmd = command.matched_command || action;
       setActiveVoiceCommand(displayCmd);
+      // Intent confidence (backend fuzzy-match score) is what fusion must
+      // arbitrate on; raw STT confidence stays in context_data. Sending STT
+      // confidence here dropped valid commands (e.g. confirm_action) below
+      // the 0.40 fusion threshold and fused_action came back None.
+      const intentConfidence =
+        typeof command.confidence === 'number' && command.confidence > 0
+          ? command.confidence
+          : result.confidence;
       lastPerceivedVoiceRef.current = {
         action,
         command: displayCmd,
-        confidence: result.confidence,
+        confidence: intentConfidence,
         timestamp: now,
       };
 
@@ -318,8 +343,13 @@ export function MultimodalHUD({
         {
           mode: 'voice',
           raw_intent: action,
-          confidence: result.confidence,
+          confidence: intentConfidence,
           timestamp_ms: now,
+          context_data: {
+            language: result.detected_language,
+            stt_confidence: result.confidence,
+            matched_command: displayCmd,
+          },
         },
       ];
 
@@ -335,12 +365,19 @@ export function MultimodalHUD({
           raw_intent: lastPerceivedGestureRef.current.gesture.toLowerCase(),
           confidence: gConf,
           timestamp_ms: lastPerceivedGestureRef.current.timestamp,
+          context_data: {
+            gesture: lastPerceivedGestureRef.current.gesture,
+            dwell_time_ms: dwellTimeMs,
+            source: 'hand-landmarker',
+          },
         });
       }
 
       const fusedResult = await api.processMultimodalIntent({
         inputs,
         temporal_window_ms: 1500,
+        work_session_id: workSessionId || null,
+        client_context: { source: 'multimodal-hud', modality, language },
       });
 
       // Combine confirmation requirements: fusion, voice service, and low_confidence
