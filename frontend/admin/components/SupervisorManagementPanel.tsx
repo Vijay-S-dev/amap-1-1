@@ -98,7 +98,7 @@ export function SupervisorManagementPanel() {
                   {sup.department_name || 'Powertrain & Gearbox Integration'}
                 </td>
                 <td style={{ padding: '1rem 1.25rem', fontSize: '0.9rem' }}>
-                  <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{sup.assigned_workers_count ?? 3}</span> workers
+                  <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{sup.assigned_workers_count ?? '—'}</span> workers
                 </td>
                 <td style={{ padding: '1rem 1.25rem' }}>
                   <span

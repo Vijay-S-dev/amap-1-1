@@ -166,10 +166,10 @@ export function OrganizationOverviewPanel() {
             Total Workforce
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.25rem', color: '#3b82f6' }}>
-            {dashboard?.total_workers_count ?? 5}
+            {dashboard?.total_workers_count ?? '—'}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-            {dashboard?.active_workers_count ?? 4} active on line
+            {dashboard?.active_workers_count ?? '—'} active on line
           </div>
         </div>
 
@@ -178,10 +178,10 @@ export function OrganizationOverviewPanel() {
             Line Utilization
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.25rem', color: '#10b981' }}>
-            {dashboard?.current_line_utilization_percent ?? 75}%
+            {dashboard?.current_line_utilization_percent ?? '—'}%
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-            {dashboard?.active_tasks_count ?? 3} active assembly stations
+            {dashboard?.active_tasks_count ?? '—'} active assembly stations
           </div>
         </div>
 
@@ -190,10 +190,10 @@ export function OrganizationOverviewPanel() {
             Departments
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.25rem', color: '#8b5cf6' }}>
-            {dashboard?.departments_count ?? 3}
+            {dashboard?.departments_count ?? '—'}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-            {dashboard?.supervisors_count ?? 2} floor supervisors
+            {dashboard?.supervisors_count ?? '—'} floor supervisors
           </div>
         </div>
 
@@ -202,7 +202,7 @@ export function OrganizationOverviewPanel() {
             Completed Cycles
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.25rem', color: '#f59e0b' }}>
-            {dashboard?.completed_tasks_count ?? 19}
+            {dashboard?.completed_tasks_count ?? '—'}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
             94.5% first-pass yield
@@ -214,7 +214,7 @@ export function OrganizationOverviewPanel() {
             Assistance Tickets
           </div>
           <div style={{ fontSize: '2rem', fontWeight: 800, marginTop: '0.25rem', color: '#ef4444' }}>
-            {dashboard?.open_assistance_requests_count ?? 1}
+            {dashboard?.open_assistance_requests_count ?? '—'}
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
             Avg response: 1.5 mins

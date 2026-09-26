@@ -103,17 +103,17 @@ export function DepartmentManagementPanel() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginTop: '1.25rem' }}>
                 <div style={{ padding: '0.75rem', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.04)', textAlign: 'center' }}>
                   <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Supervisors</div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: '0.15rem' }}>{dept.supervisor_count ?? 1}</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: '0.15rem' }}>{dept.supervisor_count ?? '—'}</div>
                 </div>
 
                 <div style={{ padding: '0.75rem', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.04)', textAlign: 'center' }}>
                   <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Workers</div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: '0.15rem' }}>{dept.worker_count ?? 2}</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: '0.15rem' }}>{dept.worker_count ?? '—'}</div>
                 </div>
 
                 <div style={{ padding: '0.75rem', borderRadius: '12px', background: 'rgba(255, 255, 255, 0.04)', textAlign: 'center' }}>
                   <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Active Tasks</div>
-                  <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: '0.15rem' }}>{dept.active_tasks_count ?? 1}</div>
+                  <div style={{ fontSize: '1.2rem', fontWeight: 700, marginTop: '0.15rem' }}>{dept.active_tasks_count ?? '—'}</div>
                 </div>
               </div>
             </div>

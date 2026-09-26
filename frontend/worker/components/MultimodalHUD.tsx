@@ -315,7 +315,7 @@ export function MultimodalHUD({
 
       // Unmatched commands: give feedback to worker, do not proceed
       if (!command.action_mapping) {
-        setActiveVoiceCommand(null);
+        setActiveVoiceCommand('standby');
         setMicErrorMessage(command.message || 'Command not recognized. Please try again.');
         announce(command.message || 'Voice command not recognized.');
         return;

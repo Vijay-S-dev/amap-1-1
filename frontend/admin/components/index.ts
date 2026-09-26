@@ -7,4 +7,3 @@ export * from './AdaptationReviewPanel';
 export * from './AuditLogTimeline';
 export * from './InteractionPresetEditor';
 export * from './RolePermissionsMatrix';
-export * from './WorkflowBuilder';

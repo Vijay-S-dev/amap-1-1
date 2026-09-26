@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "postinstall": "node scripts/setup-mediapipe-assets.mjs"
+    "postinstall": "node scripts/setup-mediapipe-assets.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1",
