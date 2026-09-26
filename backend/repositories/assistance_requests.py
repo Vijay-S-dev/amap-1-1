@@ -222,8 +222,13 @@ class AssistanceRequestsRepository:
         self,
         assistance_request_id: UUID,
         status: str,
+        request_data: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        """Update an assistance request status and return it."""
+        """Update an assistance request status and return it.
+
+        When ``request_data`` is omitted the stored payload is left untouched,
+        so existing callers keep their previous behaviour.
+        """
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
@@ -231,6 +236,7 @@ class AssistanceRequestsRepository:
                     UPDATE assistance_requests
                     SET
                         status = %s,
+                        request_data = COALESCE(%s, request_data),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                     RETURNING
@@ -252,6 +258,7 @@ class AssistanceRequestsRepository:
                     """,
                     (
                         status,
+                        Jsonb(request_data) if request_data is not None else None,
                         assistance_request_id,
                     ),
                 )
@@ -304,8 +311,13 @@ class AssistanceRequestsRepository:
     def resolve(
         self,
         assistance_request_id: UUID,
+        request_data: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        """Resolve an assistance request."""
+        """Resolve an assistance request.
+
+        When ``request_data`` is omitted the stored payload is left untouched,
+        so existing callers keep their previous behaviour.
+        """
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
@@ -314,6 +326,7 @@ class AssistanceRequestsRepository:
                     SET
                         status = 'resolved',
                         resolved_at = CURRENT_TIMESTAMP,
+                        request_data = COALESCE(%s, request_data),
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
                     RETURNING
@@ -333,7 +346,10 @@ class AssistanceRequestsRepository:
                         created_at,
                         updated_at
                     """,
-                    (assistance_request_id,),
+                    (
+                        Jsonb(request_data) if request_data is not None else None,
+                        assistance_request_id,
+                    ),
                 )
 
                 assistance_request = cursor.fetchone()

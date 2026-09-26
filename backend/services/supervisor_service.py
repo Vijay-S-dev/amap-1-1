@@ -643,10 +643,8 @@ class SupervisorService:
         if req.get("organization_id") != organization_id:
             raise UnauthorizedError("Access denied: Assistance request belongs to another organization.")
 
-        updated = self.assistance_requests_repo.update_status(
+        updated = self.assistance_requests_repo.acknowledge(
             assistance_request_id=request_id,
-            status="acknowledged",
-            acknowledged_at=datetime.now(timezone.utc),
         )
 
         self.audit_events_repo.create(
@@ -718,10 +716,8 @@ class SupervisorService:
         if payload and payload.resolution_notes:
             req_data["final_resolution_notes"] = payload.resolution_notes
 
-        updated = self.assistance_requests_repo.update_status(
+        updated = self.assistance_requests_repo.resolve(
             assistance_request_id=request_id,
-            status="resolved",
-            resolved_at=datetime.now(timezone.utc),
             request_data=req_data,
         )
 

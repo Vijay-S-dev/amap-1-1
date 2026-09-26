@@ -7,6 +7,7 @@ inside transactional blocks with validation.
 
 import argparse
 import os
+import sys
 from pathlib import Path
 from typing import List, Optional
 import psycopg
@@ -85,7 +86,9 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="List migrations without executing on database")
     args = parser.parse_args()
 
-    run_migrations(db_url=args.db_url, dry_run=args.dry_run)
+    # Exit non-zero on failure so CI actually gates on the migration step.
+    if not run_migrations(db_url=args.db_url, dry_run=args.dry_run):
+        sys.exit(1)
 
 
 if __name__ == "__main__":

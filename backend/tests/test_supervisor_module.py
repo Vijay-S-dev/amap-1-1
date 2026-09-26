@@ -25,7 +25,7 @@ Tests:
 """
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, create_autospec
 from uuid import UUID, uuid4
 import pytest
 from starlette.testclient import TestClient
@@ -46,6 +46,7 @@ from models.supervisor import (
 )
 from routes.supervisor import get_supervisor_service
 from services.base import ConflictError, NotFoundError, UnauthorizedError
+from repositories.assistance_requests import AssistanceRequestsRepository
 from services.supervisor_service import SupervisorService
 
 
@@ -108,7 +109,10 @@ def test_supervisor_service_dashboard_summary_unit():
     mock_sessions_repo = MagicMock()
     mock_tasks_repo = MagicMock()
     mock_assignments_repo = MagicMock()
-    mock_assistance_repo = MagicMock()
+    # Spec'd against the real repository so a service call passing an argument
+    # the repository does not accept fails the test, instead of being silently
+    # swallowed by a permissive MagicMock.
+    mock_assistance_repo = create_autospec(AssistanceRequestsRepository, instance=True)
     mock_audit_repo = MagicMock()
     mock_personalizations_repo = MagicMock()
     mock_wf_assigns_repo = MagicMock()
@@ -211,7 +215,10 @@ def test_supervisor_service_assign_and_reassign_task_unit():
 
 def test_supervisor_service_assistance_lifecycle_unit():
     """Unit test for acknowledge, guidance response, and resolution of assistance."""
-    mock_assistance_repo = MagicMock()
+    # Spec'd against the real repository so a service call passing an argument
+    # the repository does not accept fails the test, instead of being silently
+    # swallowed by a permissive MagicMock.
+    mock_assistance_repo = create_autospec(AssistanceRequestsRepository, instance=True)
     mock_audit_repo = MagicMock()
 
     service = SupervisorService(
