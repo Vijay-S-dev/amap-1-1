@@ -252,8 +252,17 @@ class MultimodalService:
             for item in valid_items
         })
 
+        has_voice_command = any(
+            (item.mode == InteractionMode.VOICE or str(getattr(item.mode, "value", item.mode)) == "voice")
+            and _resolve_candidate_action(item)[0] is not None
+            for item in valid_items
+        )
+
         for item in valid_items:
             action, is_spatial = _resolve_candidate_action(item)
+            # If pointing is accompanied by a voice command, pointing acts as spatial binding
+            if item.raw_intent.lower().strip() in {"pointing", "point"} and has_voice_command and not is_spatial:
+                action, is_spatial = "point_focus", True
             if is_spatial and item.context_data:
                 spatial_targets.update(item.context_data)
             resolved_actions.append((action, item.confidence, item))

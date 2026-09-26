@@ -224,7 +224,10 @@ class GestureService:
 
         # 1. Evaluate Worker Custom Gesture Profiles loaded from database
         if worker_profile_id:
-            custom_list = self.get_worker_custom_gestures(worker_profile_id)
+            try:
+                custom_list = self.get_worker_custom_gestures(worker_profile_id)
+            except Exception:
+                custom_list = []
 
             if custom_list:
                 live_vec, scale = extract_normalized_feature_vector(landmarks)
