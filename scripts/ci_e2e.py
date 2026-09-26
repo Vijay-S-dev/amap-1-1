@@ -48,7 +48,7 @@ def call(method: str, path: str, token: str | None = None, body=None):
 
 def check(name: str, ok: bool, detail: str = "") -> None:
     checks.append((name, bool(ok), detail))
-    print(f"{'PASS' if ok else 'FAIL'}: {name}" + ("" if ok else f" ({detail})"))
+    print(f"{'PASS' if ok else 'FAIL'}: {name}" + ("" if ok else f" ({detail})"), flush=True)
 
 
 def pg(sql: str, params=None):
@@ -65,7 +65,7 @@ def pg(sql: str, params=None):
 
 def main() -> int:
     if not DSN:
-        print("DATABASE_URL is required")
+        print("DATABASE_URL is required", flush=True)
         return 2
 
     # 1. health
@@ -227,7 +227,7 @@ def main() -> int:
     st, sup_dash = call("GET", "/api/v1/supervisor/dashboard", supervisor_token)
     check(
         "supervisor dashboard real metrics",
-        st == 200 and isinstance(sup_dash, dict) and "total_workers" in sup_dash,
+        st == 200 and isinstance(sup_dash, dict) and "active_workers_count" in sup_dash,
         f"{st} {sup_dash}",
     )
 
@@ -239,60 +239,52 @@ def main() -> int:
     )
 
     # 11. task assignment & execution lifecycle -> task_results in PostgreSQL
-    st_assigned, assigned_list = call("GET", "/api/v1/tasks/assigned", worker_token)
-    assignment = None
-    if st_assigned == 200 and isinstance(assigned_list, list) and len(assigned_list) > 0:
-        assignment = assigned_list[0]
-    else:
-        st_tasks, sup_tasks = call("GET", "/api/v1/supervisor/tasks", supervisor_token)
-        if st_tasks == 200 and isinstance(sup_tasks, list) and len(sup_tasks) > 0 and len(sup_workers) > 0:
-            task_id = sup_tasks[0]["id"]
-            worker_id = sup_workers[0]["worker_profile_id"]
-            st_assign, new_assign = call(
+    st_tasks, sup_tasks = call("GET", "/api/v1/supervisor/tasks", supervisor_token)
+    if st_tasks == 200 and isinstance(sup_tasks, list) and len(sup_tasks) > 0 and len(sup_workers) > 0:
+        task_id = sup_tasks[0]["id"]
+        worker_id = sup_workers[0]["worker_profile_id"]
+        st_assign, new_assign = call(
+            "POST",
+            "/api/v1/supervisor/tasks/assign",
+            supervisor_token,
+            {"task_id": task_id, "worker_profile_id": worker_id},
+        )
+        check("task assigned by supervisor", st_assign == 201 and bool(new_assign and "id" in new_assign), f"{st_assign} {new_assign}")
+        assignment_id = new_assign.get("id") if isinstance(new_assign, dict) else None
+
+        if assignment_id:
+            st, start_res = call(
                 "POST",
-                "/api/v1/supervisor/tasks/assign",
-                supervisor_token,
-                {"task_id": task_id, "worker_profile_id": worker_id},
+                f"/api/v1/tasks/assignments/{assignment_id}/start",
+                worker_token,
             )
-            assignment = new_assign
+            check("task assignment start", st == 200, f"{st} {start_res}")
 
-    check("task assignment resolved", bool(assignment and "id" in assignment), f"{assignment}")
+            wa_id = start_res.get("workflow_assignment_id") if isinstance(start_res, dict) else None
+            st_details, details = call("GET", f"/api/v1/tasks/{task_id}", worker_token)
+            steps = details.get("steps", []) if isinstance(details, dict) else []
+            if wa_id and steps:
+                for step in steps:
+                    call(
+                        "POST",
+                        f"/api/v1/tasks/workflows/assignments/{wa_id}/steps/{step['id']}/execute",
+                        worker_token,
+                        {"status": "completed", "execution_data": {"action": "step_done"}},
+                    )
 
-    if assignment:
-        assignment_id = assignment["id"]
-        task_id = assignment["task_id"]
-        st, start_res = call(
-            "POST",
-            f"/api/v1/tasks/assignments/{assignment_id}/start",
-            worker_token,
-        )
-        check("task assignment start", st in (200, 409), f"{st} {start_res}")
+            st, comp_res = call(
+                "POST",
+                f"/api/v1/tasks/assignments/{assignment_id}/complete",
+                worker_token,
+                {"outcome": "completed", "result_data": {"units_assembled": 1}},
+            )
+            check("task assignment complete", st == 200, f"{st} {comp_res}")
 
-        wa_id = start_res.get("workflow_assignment_id") if isinstance(start_res, dict) else None
-        st_details, details = call("GET", f"/api/v1/tasks/{task_id}", worker_token)
-        steps = details.get("steps", []) if isinstance(details, dict) else []
-        if wa_id and steps:
-            for step in steps:
-                call(
-                    "POST",
-                    f"/api/v1/tasks/workflows/assignments/{wa_id}/steps/{step['id']}/execute",
-                    worker_token,
-                    {"status": "completed", "execution_data": {"action": "step_done"}},
-                )
-
-        st, comp_res = call(
-            "POST",
-            f"/api/v1/tasks/assignments/{assignment_id}/complete",
-            worker_token,
-            {"outcome": "completed", "result_data": {"units_assembled": 1}},
-        )
-        check("task assignment complete", st in (200, 409), f"{st} {comp_res}")
-
-        res_rows = pg(
-            "SELECT outcome FROM task_results WHERE worker_task_assignment_id = %s",
-            (assignment_id,),
-        )
-        check("task_results row in PostgreSQL", bool(res_rows), f"{res_rows}")
+            res_rows = pg(
+                "SELECT outcome FROM task_results WHERE worker_task_assignment_id = %s",
+                (assignment_id,),
+            )
+            check("task_results row in PostgreSQL", bool(res_rows and res_rows[0][0] == "completed"), f"{res_rows}")
 
     # 12. assistance request lifecycle -> PostgreSQL persistence
     st, req_res = call(
@@ -373,12 +365,12 @@ def main() -> int:
     check("cross-org authentication rejected", st in (400, 401, 403, 404), f"{st}")
 
     failed = [c for c in checks if not c[1]]
-    print(f"\n{len(checks) - len(failed)}/{len(checks)} checks passed")
+    print(f"\n{len(checks) - len(failed)}/{len(checks)} checks passed", flush=True)
     if failed:
         for name, _, detail in failed:
-            print(f"  FAILED: {name}: {detail}")
+            print(f"  FAILED: {name}: {detail}", flush=True)
         return 1
-    print("CI E2E: ALL PASS")
+    print("CI E2E: ALL PASS", flush=True)
     return 0
 
 
