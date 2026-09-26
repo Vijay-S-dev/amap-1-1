@@ -214,6 +214,108 @@ def main() -> int:
     )
     check("audit_events have real actors", bool(audit and audit[0][0] >= 1), f"{audit}")
 
+    # 10. supervisor dashboard & worker telemetry
+    st, sup_dash = call("GET", "/api/v1/supervisor/dashboard", admin_token)
+    check(
+        "supervisor dashboard real metrics",
+        st == 200 and isinstance(sup_dash, dict) and "total_workers" in sup_dash,
+        f"{st} {sup_dash}",
+    )
+
+    st, sup_workers = call("GET", "/api/v1/supervisor/workers", admin_token)
+    check(
+        "supervisor worker list",
+        st == 200 and isinstance(sup_workers, list) and len(sup_workers) >= 1,
+        f"{st} {len(sup_workers) if isinstance(sup_workers, list) else sup_workers}",
+    )
+
+    # 11. task assignment & execution lifecycle -> task_results in PostgreSQL
+    assignment_id = "61000000-0000-0000-0000-000000000001"
+    st, start_res = call(
+        "POST",
+        f"/api/v1/tasks/assignments/{assignment_id}/start",
+        worker_token,
+    )
+    check("task assignment start", st in (200, 409), f"{st} {start_res}")
+
+    st, comp_res = call(
+        "POST",
+        f"/api/v1/tasks/assignments/{assignment_id}/complete",
+        worker_token,
+        {"outcome": "completed", "result_data": {"units_assembled": 1}},
+    )
+    check("task assignment complete", st in (200, 409), f"{st} {comp_res}")
+
+    res_rows = pg(
+        "SELECT status, outcome FROM task_results WHERE worker_task_assignment_id = %s",
+        (assignment_id,),
+    )
+    check("task_results row in PostgreSQL", bool(res_rows), f"{res_rows}")
+
+    # 12. assistance request lifecycle -> PostgreSQL persistence
+    st, req_res = call(
+        "POST",
+        "/api/v1/assistance/requests",
+        worker_token,
+        {"reason": "Need torque wrench calibration check", "priority": "normal"},
+    )
+    req_id = req_res.get("id") if isinstance(req_res, dict) else None
+    check("assistance request created", st == 201 and req_id, f"{st} {req_res}")
+
+    if req_id:
+        st, _ = call(
+            "POST",
+            f"/api/v1/supervisor/assistance/{req_id}/resolve",
+            admin_token,
+            {"resolution_notes": "Calibrated tool supplied"},
+        )
+        check("assistance request resolved by supervisor", st == 200, f"{st}")
+        ast_row = pg("SELECT status FROM assistance_requests WHERE id = %s", (req_id,))
+        check("assistance_requests status 'resolved' in PostgreSQL", bool(ast_row and ast_row[0][0] == "resolved"), f"{ast_row}")
+
+    # 13. custom gesture training & lifecycle -> custom_gestures in PostgreSQL
+    sample_landmarks = [{"x": 0.5 + 0.01 * i, "y": 0.5, "z": 0.0} for i in range(21)]
+    five_samples = [sample_landmarks for _ in range(5)]
+    st, train_res = call(
+        "POST",
+        "/api/v1/gestures/custom/train",
+        worker_token,
+        {
+            "gesture_name": "CI Test Custom Gesture",
+            "action_mapping": "confirm_action",
+            "handedness": "Right",
+            "samples": five_samples,
+        },
+    )
+    cg_id = train_res.get("id") if isinstance(train_res, dict) else None
+    check("custom gesture trained", st == 201 and cg_id, f"{st} {train_res}")
+
+    if cg_id:
+        cg_rows = pg("SELECT gesture_name, is_active FROM custom_gestures WHERE id = %s", (cg_id,))
+        check("custom_gestures row in PostgreSQL", bool(cg_rows and cg_rows[0][1] is True), f"{cg_rows}")
+        st, del_res = call("DELETE", f"/api/v1/gestures/custom/{cg_id}", worker_token)
+        check("custom gesture deleted", st == 200, f"{st} {del_res}")
+        cg_after = pg("SELECT is_active FROM custom_gestures WHERE id = %s", (cg_id,))
+        check("custom gesture soft-deleted (inactive)", bool(cg_after and cg_after[0][0] is False), f"{cg_after}")
+
+    # 14. safety-critical interlock gating
+    st, gate_res = call(
+        "POST",
+        "/api/v1/actions/execute",
+        worker_token,
+        {"action_name": "voltage_adjustment", "is_secondary_confirmed": False},
+    )
+    check("unconfirmed safety-critical action rejected", st in (400, 403, 404, 422), f"{st} {gate_res}")
+
+    # 15. cross-organization isolation (tenancy boundary)
+    FAKE_ORG = "00000000-0000-0000-0000-000000000099"
+    st, bad_login = call(
+        "POST",
+        "/api/v1/auth/login",
+        body={"organization_id": FAKE_ORG, "email": WORKER, "password": PASSWORD},
+    )
+    check("cross-org authentication rejected", st in (400, 401, 403, 404), f"{st}")
+
     failed = [c for c in checks if not c[1]]
     print(f"\n{len(checks) - len(failed)}/{len(checks)} checks passed")
     if failed:
