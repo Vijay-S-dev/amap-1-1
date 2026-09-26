@@ -12,7 +12,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.dependencies import get_current_user, require_roles
+from app.dependencies import get_current_user, require_permissions, require_roles
 from models.auth import AuthenticatedUserContext
 from models.supervisor import (
     AssistanceResolvePayload,
@@ -31,7 +31,13 @@ from services.supervisor_service import SupervisorService
 router = APIRouter(
     prefix="/supervisor",
     tags=["Supervisor & Fleet Operations"],
-    dependencies=[Depends(require_roles("supervisor", "manager", "admin", "superadmin"))],
+    dependencies=[
+        Depends(
+            require_roles(
+                "supervisor", "manager", "admin", "organization_admin", "superadmin"
+            )
+        )
+    ],
 )
 
 
@@ -184,6 +190,7 @@ def list_assistance(
     response_model=Dict[str, Any],
     status_code=status.HTTP_200_OK,
     summary="Supervisor acknowledges assistance request",
+    dependencies=[Depends(require_permissions("assistance:resolve"))],
 )
 def acknowledge_assistance(
     request_id: UUID,
@@ -208,6 +215,7 @@ def acknowledge_assistance(
     response_model=Dict[str, Any],
     status_code=status.HTTP_200_OK,
     summary="Supervisor transmits guidance message to worker",
+    dependencies=[Depends(require_permissions("assistance:resolve"))],
 )
 def respond_assistance(
     request_id: UUID,
@@ -234,6 +242,7 @@ def respond_assistance(
     response_model=Dict[str, Any],
     status_code=status.HTTP_200_OK,
     summary="Supervisor resolves and closes assistance request",
+    dependencies=[Depends(require_permissions("assistance:resolve"))],
 )
 def resolve_assistance(
     request_id: UUID,

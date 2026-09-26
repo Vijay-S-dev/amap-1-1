@@ -38,7 +38,15 @@ def mock_worker_context():
         full_name="AMAP Worker",
         status="active",
         roles=["worker", "supervisor"],
-        permissions=["tasks:read", "tasks:write"],
+        permissions=[
+            "session:read",
+            "session:write",
+            "multimodal:input",
+            "assistance:request",
+            "assistance:resolve",
+            "tasks:read",
+            "tasks:write",
+        ],
         worker_profile_id=worker_id,
     )
 

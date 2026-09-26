@@ -315,33 +315,27 @@ def test_auth_service_nonexistent_user_fails_closed():
 
 def test_auth_service_db_failure_fails_closed():
     """
-    TASK 1 PROOF: Database exception during lookup must fail closed with UnauthorizedError.
+    Phase 9 PROOF: A database outage during lookup propagates as an error
+    (fail loudly, HTTP 500) — it is never masked as "invalid credentials" and
+    there is no fallback identity that could log anyone in.
     """
     mock_users_repo = MagicMock()
     mock_users_repo.get_by_email.side_effect = RuntimeError("Database connection timed out")
     org_id = uuid.uuid4()
 
     service = AuthService(users_repo=mock_users_repo)
-    with pytest.raises(UnauthorizedError, match="Invalid email or password."):
+    with pytest.raises(RuntimeError, match="Database connection timed out"):
         service.authenticate_user(org_id, "worker@amap.org", "SomePassword123!")
 
 
-def test_auth_service_production_blocks_demo_user_fallback(monkeypatch):
+def test_auth_service_no_demo_user_fallback(monkeypatch):
     """
-    TASK 2 PROOF: Production environment (ENVIRONMENT=production) must NEVER
-    fall back to _DEV_DEMO_USERS when database lookup yields no record.
+    Phase 9 PROOF: the in-memory _DEV_DEMO_USERS fallback was deleted.
+    A database miss must fail closed in EVERY environment — there is no
+    demo identity to fall back to, regardless of ENABLE_DEV_DEMO_USERS.
     """
-    from app import config
-
-    mock_settings = MagicMock()
-    mock_settings.is_production = True
-    mock_settings.environment = "production"
-    mock_settings.enable_dev_demo_users = False
-
-    monkeypatch.setattr(config, "get_settings", lambda: mock_settings)
-    # Also patch in auth_service module
-    from services import auth_service as auth_service_mod
-    monkeypatch.setattr(auth_service_mod, "get_settings", lambda: mock_settings)
+    import os
+    monkeypatch.setenv("ENABLE_DEV_DEMO_USERS", "true")
 
     mock_users_repo = MagicMock()
     mock_users_repo.get_by_email.return_value = None
@@ -350,10 +344,12 @@ def test_auth_service_production_blocks_demo_user_fallback(monkeypatch):
     service = AuthService(users_repo=mock_users_repo)
     org_id = uuid.UUID("9a61e05d-7a32-4112-9c17-1833d7b42f65")
 
-    # In development demo users existed for 'alex.worker@amap.com'.
-    # In production, this MUST FAIL closed.
     with pytest.raises(UnauthorizedError, match="Invalid email or password."):
         service.authenticate_user(org_id, "alex.worker@amap.com", "SecurePassword123!")
+
+    # The demo table itself must be gone from the codebase.
+    from services import auth_service as auth_service_mod
+    assert not hasattr(auth_service_mod, "_DEV_DEMO_USERS")
 
 
 def test_production_config_rejects_insecure_settings(monkeypatch):
@@ -380,13 +376,12 @@ def test_production_config_rejects_insecure_settings(monkeypatch):
     with pytest.raises(RuntimeError, match="at least 32 characters"):
         Settings()
 
-    # 3. Reject ENABLE_DEV_DEMO_USERS=true in production
+    # 3. ENABLE_DEV_DEMO_USERS is no longer a supported setting at all
+    #    (the demo-user fallback was removed in Phase 9).
     monkeypatch.setenv("JWT_SECRET_KEY", "a" * 32)
     monkeypatch.setenv("ENABLE_DEV_DEMO_USERS", "true")
-    with pytest.raises(RuntimeError, match="ENABLE_DEV_DEMO_USERS cannot be enabled"):
-        Settings()
+    valid_settings = Settings()
+    assert not hasattr(valid_settings, "enable_dev_demo_users")
 
     # 4. Valid production settings pass
-    monkeypatch.setenv("ENABLE_DEV_DEMO_USERS", "false")
-    valid_settings = Settings()
     assert valid_settings.is_production is True

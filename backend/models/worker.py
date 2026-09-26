@@ -136,6 +136,33 @@ class AdaptationEvaluationResult(AMAPBaseModel):
     message: Optional[str] = None
 
 
+class AdaptationRecommendationRecord(AMAPBaseModel):
+    """Persisted adaptation recommendation row with worker-name enrichment."""
+
+    id: UUID
+    organization_id: UUID
+    worker_profile_id: UUID
+    worker_name: Optional[str] = None
+    recommendation_type: str
+    current_value: Any = None
+    suggested_value: Any = None
+    confidence: float
+    reason: str
+    auto_applicable: bool
+    evidence_count: int
+    status: str
+    reviewed_by: Optional[UUID] = None
+    reviewed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdaptationReviewPayload(StrictInputModel):
+    """Supervisor/admin decision on a pending adaptation recommendation."""
+
+    action: str = Field(..., pattern="^(approve|dismiss)$")
+
+
 class ApplyAdaptationRequest(StrictInputModel):
     """Explicit request to apply a recommended or custom adaptation."""
     adaptation_type: str = Field(..., min_length=1, max_length=100)

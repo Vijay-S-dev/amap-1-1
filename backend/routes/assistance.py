@@ -18,6 +18,7 @@ from pydantic import Field
 from app.dependencies import (
     get_current_active_worker,
     get_current_user,
+    require_permissions,
     require_roles,
 )
 from models.assistance import (
@@ -55,6 +56,7 @@ class CreateAssistancePayload(StrictInputModel):
     response_model=AssistanceRequestRead,
     status_code=status.HTTP_201_CREATED,
     summary="Create a worker assistance request",
+    dependencies=[Depends(require_permissions("assistance:request"))],
 )
 def create_request(
     payload: CreateAssistancePayload,
@@ -80,7 +82,10 @@ def create_request(
     response_model=AssistanceRequestRead,
     status_code=status.HTTP_200_OK,
     summary="Acknowledge an assistance request",
-    dependencies=[Depends(require_roles("supervisor", "manager", "admin", "organization_admin"))],
+    dependencies=[
+        Depends(require_roles("supervisor", "manager", "admin", "organization_admin")),
+        Depends(require_permissions("assistance:resolve")),
+    ],
 )
 def acknowledge_request(
     request_id: UUID,
@@ -104,7 +109,10 @@ def acknowledge_request(
     response_model=AssistanceRequestRead,
     status_code=status.HTTP_200_OK,
     summary="Resolve an assistance request",
-    dependencies=[Depends(require_roles("supervisor", "manager", "admin", "organization_admin"))],
+    dependencies=[
+        Depends(require_roles("supervisor", "manager", "admin", "organization_admin")),
+        Depends(require_permissions("assistance:resolve")),
+    ],
 )
 def resolve_request(
     request_id: UUID,

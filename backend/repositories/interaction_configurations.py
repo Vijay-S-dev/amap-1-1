@@ -30,6 +30,7 @@ class InteractionConfigurationsRepository:
                         organization_id,
                         name,
                         description,
+                        config_data,
                         status,
                         created_at,
                         updated_at
@@ -55,6 +56,7 @@ class InteractionConfigurationsRepository:
                         organization_id,
                         name,
                         description,
+                        config_data,
                         status,
                         created_at,
                         updated_at
@@ -80,6 +82,7 @@ class InteractionConfigurationsRepository:
                         organization_id,
                         name,
                         description,
+                        config_data,
                         status,
                         created_at,
                         updated_at
@@ -105,6 +108,7 @@ class InteractionConfigurationsRepository:
                         organization_id,
                         name,
                         description,
+                        config_data,
                         status,
                         created_at,
                         updated_at
@@ -122,8 +126,10 @@ class InteractionConfigurationsRepository:
         name: str,
         description: str | None = None,
         status: str = "active",
+        config_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Create and return an interaction configuration."""
+        """Create and return an interaction configuration with its payload."""
+        import json as _json
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
@@ -132,14 +138,16 @@ class InteractionConfigurationsRepository:
                         organization_id,
                         name,
                         description,
+                        config_data,
                         status
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s::jsonb, %s)
                     RETURNING
                         id,
                         organization_id,
                         name,
                         description,
+                        config_data,
                         status,
                         created_at,
                         updated_at
@@ -148,6 +156,7 @@ class InteractionConfigurationsRepository:
                         organization_id,
                         name,
                         description,
+                        _json.dumps(config_data or {}),
                         status,
                     ),
                 )
@@ -177,12 +186,59 @@ class InteractionConfigurationsRepository:
                         organization_id,
                         name,
                         description,
+                        config_data,
                         status,
                         created_at,
                         updated_at
                     """,
                     (
                         status,
+                        interaction_configuration_id,
+                    ),
+                )
+
+                interaction_configuration = cursor.fetchone()
+                connection.commit()
+
+                return interaction_configuration
+
+    def update(
+        self,
+        interaction_configuration_id: UUID,
+        name: str,
+        description: str | None = None,
+        status: str = "active",
+        config_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Update name/description/status/config_data and return the new row."""
+        import json as _json
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    UPDATE interaction_configurations
+                    SET
+                        name = %s,
+                        description = %s,
+                        status = %s,
+                        config_data = %s::jsonb,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING
+                        id,
+                        organization_id,
+                        name,
+                        description,
+                        config_data,
+                        status,
+                        created_at,
+                        updated_at
+                    """,
+                    (
+                        name,
+                        description,
+                        status,
+                        _json.dumps(config_data if config_data is not None else {}),
                         interaction_configuration_id,
                     ),
                 )

@@ -7,7 +7,7 @@ Provides real-time cross-modal intent fusion, spatial-action binding, and confli
 
 from fastapi import APIRouter, Depends, status
 
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, require_permissions
 from models.auth import AuthenticatedUserContext
 from models.multimodal import MultimodalFusionPayload, MultimodalFusionResult
 from services.multimodal_service import MultimodalService
@@ -27,6 +27,7 @@ def get_multimodal_service() -> MultimodalService:
     response_model=MultimodalFusionResult,
     status_code=status.HTTP_200_OK,
     summary="Arbitrate and fuse multimodal inputs across modalities",
+    dependencies=[Depends(require_permissions("multimodal:input"))],
 )
 def fuse_multimodal_inputs(
     payload: MultimodalFusionPayload,

@@ -113,6 +113,36 @@ export interface AdaptationRecommendation {
   autoApplicable: boolean;
 }
 
+export interface PermissionMatrixEntry {
+  permission: { id: string; name: string; description?: string | null };
+  roles: Record<string, boolean>;
+}
+
+export interface PermissionMatrix {
+  organization_id: string;
+  roles: string[];
+  permissions: PermissionMatrixEntry[];
+}
+
+export interface AdaptationReviewItem {
+  id: string;
+  organization_id: string;
+  worker_profile_id: string;
+  worker_name?: string | null;
+  recommendation_type: string;
+  current_value: unknown;
+  suggested_value: unknown;
+  confidence: number;
+  reason: string;
+  auto_applicable: boolean;
+  evidence_count: number;
+  status: 'pending' | 'approved' | 'dismissed';
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface AssistanceTicket {
   id: string;
   workSessionId: string;

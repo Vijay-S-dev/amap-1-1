@@ -127,7 +127,15 @@ def test_e2e_complete_worker_session_and_task_lifecycle():
             full_name="AMAP Assembly Worker",
             status="active",
             roles=["worker"],
-            permissions=["tasks:read", "tasks:write", "actions:execute"],
+            permissions=[
+                "tasks:read",
+                "tasks:write",
+                "actions:execute",
+                "assistance:request",
+                "session:read",
+                "session:write",
+                "multimodal:input",
+            ],
             worker_profile_id=worker_id,
         )
 
@@ -334,7 +342,7 @@ def test_e2e_worker_safety_gate_enforcement_in_workflow():
         full_name="AMAP Worker",
         status="active",
         roles=["worker"],
-        permissions=["actions:execute"],
+        permissions=["actions:execute", "assistance:request"],
         worker_profile_id=worker_id,
     )
 
@@ -392,7 +400,7 @@ def test_e2e_worker_assistance_and_notification_flow():
             full_name="Worker",
             status="active",
             roles=["worker"],
-            permissions=[],
+            permissions=["assistance:request"],
             worker_profile_id=worker_profile_id,
         )
 
@@ -404,7 +412,7 @@ def test_e2e_worker_assistance_and_notification_flow():
             full_name="Supervisor",
             status="active",
             roles=["supervisor"],
-            permissions=[],
+            permissions=["assistance:resolve"],
             worker_profile_id=None,
         )
 
@@ -524,7 +532,7 @@ def test_e2e_cross_tenant_isolation_during_workflow():
         full_name="Worker A",
         status="active",
         roles=["supervisor"],
-        permissions=[],
+        permissions=["assistance:resolve"],
         worker_profile_id=worker_id,
     )
 

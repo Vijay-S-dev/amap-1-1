@@ -12,10 +12,12 @@ from uuid import UUID
 from models.worker import (
     AdaptationEvaluationResult,
     AdaptationRecommendation,
+    AdaptationRecommendationRecord,
     PersonalizationHistoryRead,
     WorkerCapabilityProfileRead,
     WorkerPersonalizationRead,
 )
+from repositories.adaptation_recommendations import AdaptationRecommendationsRepository
 from repositories.interaction_events import InteractionEventsRepository
 from repositories.personalization_history import PersonalizationHistoryRepository
 from repositories.worker_capability_profiles import WorkerCapabilityProfilesRepository
@@ -32,6 +34,7 @@ class PersonalizationService:
         history_repo: Optional[PersonalizationHistoryRepository] = None,
         interaction_events_repo: Optional[InteractionEventsRepository] = None,
         capabilities_repo: Optional[WorkerCapabilityProfilesRepository] = None,
+        recommendations_repo: Optional[AdaptationRecommendationsRepository] = None,
     ) -> None:
         self.personalizations_repo = (
             personalizations_repo or WorkerPersonalizationsRepository()
@@ -42,6 +45,9 @@ class PersonalizationService:
         )
         self.capabilities_repo = (
             capabilities_repo or WorkerCapabilityProfilesRepository()
+        )
+        self.recommendations_repo = (
+            recommendations_repo or AdaptationRecommendationsRepository()
         )
 
     def get_personalization(
@@ -197,10 +203,112 @@ class PersonalizationService:
             "recommendations": recommendations,
         }
 
+    def _persist_pending_recommendations(
+        self,
+        organization_id: UUID,
+        worker_profile_id: UUID,
+        recommendations: List[AdaptationRecommendation],
+        evidence_count: int,
+        skip_types: set,
+    ) -> List[AdaptationRecommendationRecord]:
+        """Store pending recommendations in PostgreSQL (deduplicated by type)."""
+        stored: List[AdaptationRecommendationRecord] = []
+        for rec in recommendations:
+            if rec.recommendation_type in skip_types:
+                continue
+            existing = self.recommendations_repo.find_pending(
+                organization_id, worker_profile_id, rec.recommendation_type
+            )
+            if existing:
+                stored.append(
+                    AdaptationRecommendationRecord.model_validate(
+                        {**existing, "worker_name": None}
+                    )
+                )
+                continue
+            row = self.recommendations_repo.create(
+                organization_id=organization_id,
+                worker_profile_id=worker_profile_id,
+                recommendation_type=rec.recommendation_type,
+                current_value=rec.current_value,
+                suggested_value=rec.suggested_value,
+                confidence=rec.confidence,
+                reason=rec.reason,
+                auto_applicable=rec.auto_applicable,
+                evidence_count=evidence_count,
+            )
+            stored.append(
+                AdaptationRecommendationRecord.model_validate({**row, "worker_name": None})
+            )
+        return stored
+
+    def list_recommendations(
+        self,
+        organization_id: UUID,
+        status: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[AdaptationRecommendationRecord]:
+        """List an organization's adaptation recommendations (review queue)."""
+        rows = self.recommendations_repo.list_by_organization(
+            organization_id, status=status, limit=limit
+        )
+        return [AdaptationRecommendationRecord.model_validate(r) for r in rows]
+
+    def review_recommendation(
+        self,
+        organization_id: UUID,
+        recommendation_id: UUID,
+        action: str,
+        reviewer_id: UUID,
+    ) -> AdaptationRecommendationRecord:
+        """Approve (apply) or dismiss one pending recommendation."""
+        row = self.recommendations_repo.get_by_id(recommendation_id)
+        if not row or row["organization_id"] != organization_id:
+            raise NotFoundError("Adaptation recommendation not found.")
+        if row["status"] != "pending":
+            from services.base import ConflictError
+
+            raise ConflictError(
+                f"Recommendation already reviewed (status={row['status']})."
+            )
+
+        if action == "approve":
+            current = self.get_personalization(row["worker_profile_id"])
+            new_data = dict(current.personalization_data) if current else {}
+            rtype = row["recommendation_type"]
+            suggested = row["suggested_value"]
+            if rtype == "dwell_time_adjustment":
+                new_data["dwell_time_ms"] = suggested
+            elif rtype == "modality_switch_recommendation":
+                new_data["preferred_modality"] = suggested
+            else:
+                new_data[rtype] = suggested
+            self.update_personalization(
+                worker_profile_id=row["worker_profile_id"],
+                new_data=new_data,
+                change_reason=f"Approved adaptation: {rtype}",
+            )
+
+        updated = self.recommendations_repo.update_status(
+            recommendation_id, "approved" if action == "approve" else "dismissed",
+            reviewer_id,
+        )
+        enriched = self.recommendations_repo.get_by_id(recommendation_id)
+        names = self.recommendations_repo.list_by_organization(
+            organization_id, status=enriched["status"], limit=100
+        )
+        worker_name = next(
+            (n["worker_name"] for n in names if n["id"] == recommendation_id), None
+        )
+        return AdaptationRecommendationRecord.model_validate(
+            {**enriched, "worker_name": worker_name}
+        )
+
     def evaluate_and_adapt(
         self,
         worker_profile_id: UUID,
         auto_apply: bool = False,
+        organization_id: Optional[UUID] = None,
     ) -> AdaptationEvaluationResult:
         """
         Multi-signal evidence evaluation engine for AMAP.
@@ -227,6 +335,7 @@ class PersonalizationService:
 
         recommendations: List[AdaptationRecommendation] = []
         auto_applied: List[str] = []
+        auto_applied_types: set = set()
         new_data = dict(current_data)
 
         # Rule 1: Repeated gesture tremor / dwell failure (>= 3 occurrences)
@@ -248,6 +357,7 @@ class PersonalizationService:
             if auto_apply:
                 new_data["dwell_time_ms"] = suggested_dwell
                 auto_applied.append(f"Adjusted dwell_time_ms to {suggested_dwell}")
+                auto_applied_types.add("dwell_time_adjustment")
 
         # Rule 2: Repeated voice acoustic failure (>= 3 occurrences)
         if len(voice_fails) >= 3:
@@ -270,6 +380,17 @@ class PersonalizationService:
                 worker_profile_id=worker_profile_id,
                 new_data=new_data,
                 change_reason="Automated evidence-based adaptation",
+            )
+
+        # Persist non-applied recommendations as pending review rows so the
+        # supervisor/admin queue is real PostgreSQL state (not demo arrays).
+        if organization_id is not None and recommendations:
+            self._persist_pending_recommendations(
+                organization_id=organization_id,
+                worker_profile_id=worker_profile_id,
+                recommendations=recommendations,
+                evidence_count=len(recent_events),
+                skip_types=set(auto_applied_types),
             )
 
         status_str = "adapted" if auto_applied else ("recommendations_ready" if recommendations else "stable")

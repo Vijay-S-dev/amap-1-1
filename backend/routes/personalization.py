@@ -10,23 +10,28 @@ audit change history, and evaluating evidence-based adaptation recommendations:
 - GET /personalization/me/capabilities: Get worker capability profile.
 - PUT /personalization/me/capabilities: Update worker capability profile.
 - GET /personalization/me/history: Get personalization history audit trail.
+- GET /personalization/recommendations: Supervisors/admins review pending adaptations.
+- POST /personalization/recommendations/{id}/review: Approve or dismiss a recommendation.
 """
 
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import Field
 
-from app.dependencies import get_current_active_worker
+from app.dependencies import get_current_active_worker, require_roles
 from models.auth import AuthenticatedUserContext
 from models.base import StrictInputModel
 from models.worker import (
     AdaptationEvaluationResult,
+    AdaptationRecommendationRecord,
+    AdaptationReviewPayload,
     PersonalizationHistoryRead,
     WorkerCapabilityProfileRead,
     WorkerPersonalizationRead,
 )
+from services.base import ConflictError, NotFoundError
 from services.personalization_service import PersonalizationService
 
 router = APIRouter(prefix="/personalization", tags=["Personalization"])
@@ -120,6 +125,7 @@ def evaluate_and_adapt(
     return service.evaluate_and_adapt(
         worker_profile_id=current_worker.worker_profile_id,
         auto_apply=auto_apply,
+        organization_id=current_worker.organization_id,
     )
 
 
@@ -168,3 +174,50 @@ def get_my_personalization_history(
 ) -> List[PersonalizationHistoryRead]:
     """Return complete audit trail of personalization configuration changes."""
     return service.get_personalization_history(worker_profile_id=current_worker.worker_profile_id)
+
+
+@router.get(
+    "/recommendations",
+    response_model=List[AdaptationRecommendationRecord],
+    status_code=status.HTTP_200_OK,
+    summary="List organization adaptation recommendations",
+)
+def list_adaptation_recommendations(
+    rec_status: Optional[str] = Query(None, pattern="^(pending|approved|dismissed)$"),
+    current_user: AuthenticatedUserContext = Depends(
+        require_roles("supervisor", "manager", "admin", "organization_admin")
+    ),
+    service: PersonalizationService = Depends(get_personalization_service),
+) -> List[AdaptationRecommendationRecord]:
+    """Organization-scoped review queue of evidence-based adaptation suggestions."""
+    return service.list_recommendations(
+        organization_id=current_user.organization_id, status=rec_status
+    )
+
+
+@router.post(
+    "/recommendations/{recommendation_id}/review",
+    response_model=AdaptationRecommendationRecord,
+    status_code=status.HTTP_200_OK,
+    summary="Approve or dismiss an adaptation recommendation",
+)
+def review_adaptation_recommendation(
+    recommendation_id: UUID,
+    payload: AdaptationReviewPayload,
+    current_user: AuthenticatedUserContext = Depends(
+        require_roles("supervisor", "manager", "admin", "organization_admin")
+    ),
+    service: PersonalizationService = Depends(get_personalization_service),
+) -> AdaptationRecommendationRecord:
+    """Approve (applies to the worker's personalization) or dismiss a pending row."""
+    try:
+        return service.review_recommendation(
+            organization_id=current_user.organization_id,
+            recommendation_id=recommendation_id,
+            action=payload.action,
+            reviewer_id=current_user.user_id,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc

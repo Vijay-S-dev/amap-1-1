@@ -175,7 +175,7 @@ def test_multimodal_fuse_api_endpoint():
         full_name="Worker",
         status="active",
         roles=["worker"],
-        permissions=[],
+        permissions=["multimodal:input"],
         worker_profile_id=worker_id,
     )
 

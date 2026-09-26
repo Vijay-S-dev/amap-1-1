@@ -45,9 +45,6 @@ class Settings:
             os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
         )
 
-        # Development demo users toggle (§ Phase 0 security invariant)
-        self.enable_dev_demo_users: bool = os.getenv("ENABLE_DEV_DEMO_USERS", "false").lower() in ("true", "1", "yes")
-
         # Optional Supabase Integration settings
         self.supabase_url: str = os.getenv("SUPABASE_URL", "")
         self.supabase_anon_key: str = os.getenv("SUPABASE_ANON_KEY", "")
@@ -92,11 +89,6 @@ class Settings:
                 raise RuntimeError(
                     "JWT_SECRET_KEY must be explicitly set. JWT_SECRET_KEY must be explicitly configured with a secure key (at least 32 characters) in production."
                 )
-            if self.enable_dev_demo_users:
-                raise RuntimeError(
-                    "ENABLE_DEV_DEMO_USERS cannot be enabled when ENVIRONMENT=production."
-                )
-
         if not self.database_url:
             raise RuntimeError("DATABASE_URL must be explicitly set.")
 

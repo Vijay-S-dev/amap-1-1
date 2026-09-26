@@ -14,6 +14,7 @@ from routes.health import router as health_router
 from routes.interactions import router as interactions_router
 from routes.multimodal import router as multimodal_router
 from routes.organization_management import router as organization_management_router
+from routes.permissions import router as permissions_router
 from routes.personalization import router as personalization_router
 from routes.readiness import router as readiness_router
 from routes.sessions import router as sessions_router
@@ -35,6 +36,7 @@ api_v1_router.include_router(tasks_router)
 api_v1_router.include_router(actions_router)
 api_v1_router.include_router(interactions_router)
 api_v1_router.include_router(personalization_router)
+api_v1_router.include_router(permissions_router)
 api_v1_router.include_router(assistance_router)
 api_v1_router.include_router(gestures_router)
 api_v1_router.include_router(voice_router)

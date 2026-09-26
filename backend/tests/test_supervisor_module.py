@@ -73,7 +73,13 @@ def supervisor_user(org_a_id):
         full_name="Sarah Connor",
         status="active",
         roles=["supervisor"],
-        permissions=["supervisor:read", "supervisor:write", "tasks:assign", "assistance:manage"],
+        permissions=[
+            "supervisor:read",
+            "supervisor:write",
+            "tasks:assign",
+            "assistance:manage",
+            "assistance:resolve",
+        ],
     )
 
 

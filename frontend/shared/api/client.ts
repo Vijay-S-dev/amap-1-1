@@ -8,6 +8,7 @@
  */
 
 import {
+  AdaptationReviewItem,
   AssistanceTicket,
   CustomGestureProfile,
   InteractionPreset,
@@ -15,6 +16,7 @@ import {
   MultimodalFusionResult,
   MultimodalInput,
   MultimodalInputItem,
+  PermissionMatrix,
   TaskDetails,
   UserContext,
   WorkerPersonalization,
@@ -669,26 +671,101 @@ class ApiClient {
   // --------------------------------------------------------------------------
 
   async getInteractionPresets(): Promise<InteractionPreset[]> {
-    return [
-      {
-        id: 'preset-1',
-        name: 'Default Factory Floor Preset',
-        description: 'Standard optical tracking with moderate noise tolerance.',
-        status: 'active',
-        dwellTimeMs: 450,
-        gestureSensitivity: 0.85,
-        acousticFloor: 0.6,
-      },
-      {
-        id: 'preset-2',
-        name: 'High Noise Stamping Area',
-        description: 'Elevated acoustic threshold with mandatory gesture confirmation.',
-        status: 'active',
-        dwellTimeMs: 600,
-        gestureSensitivity: 0.9,
-        acousticFloor: 0.75,
-      },
-    ];
+    const rows = await this.request<any[]>('/admin/configs');
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description || undefined,
+      status: r.status,
+      dwellTimeMs: r.config_data?.dwell_time_ms ?? 450,
+      gestureSensitivity: r.config_data?.gesture_sensitivity ?? 0.85,
+      acousticFloor: r.config_data?.acoustic_floor ?? 0.6,
+    }));
+  }
+
+  async createInteractionPreset(payload: {
+    name: string;
+    description?: string;
+    config_data?: Record<string, unknown>;
+  }): Promise<InteractionPreset> {
+    const r = await this.request<any>('/admin/configs', {
+      method: 'POST',
+      body: JSON.stringify({ organization_id: this.orgId, ...payload }),
+    });
+    return {
+      id: r.id,
+      name: r.name,
+      description: r.description || undefined,
+      status: r.status,
+      dwellTimeMs: r.config_data?.dwell_time_ms ?? 450,
+      gestureSensitivity: r.config_data?.gesture_sensitivity ?? 0.85,
+      acousticFloor: r.config_data?.acoustic_floor ?? 0.6,
+    };
+  }
+
+  async updateInteractionPreset(
+    presetId: string,
+    payload: {
+      name?: string;
+      description?: string;
+      config_data?: Record<string, unknown>;
+      status?: string;
+    }
+  ): Promise<InteractionPreset> {
+    const r = await this.request<any>(`/admin/configs/${presetId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+    return {
+      id: r.id,
+      name: r.name,
+      description: r.description || undefined,
+      status: r.status,
+      dwellTimeMs: r.config_data?.dwell_time_ms ?? 450,
+      gestureSensitivity: r.config_data?.gesture_sensitivity ?? 0.85,
+      acousticFloor: r.config_data?.acoustic_floor ?? 0.6,
+    };
+  }
+
+  async deleteInteractionPreset(presetId: string): Promise<boolean> {
+    await this.request(`/admin/configs/${presetId}`, { method: 'DELETE' });
+    return true;
+  }
+
+  // Phase 9: Permission matrix (organization-scoped, PostgreSQL-backed)
+  async getPermissionsMatrix(): Promise<PermissionMatrix> {
+    return await this.request<PermissionMatrix>('/permissions/matrix');
+  }
+
+  async setPermissionGrant(payload: {
+    role_name: string;
+    permission_name: string;
+    granted: boolean;
+  }): Promise<PermissionMatrix> {
+    return await this.request<PermissionMatrix>('/permissions/matrix', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // Phase 9: Adaptation recommendations review (PostgreSQL-backed)
+  async getAdaptationRecommendations(
+    status?: 'pending' | 'approved' | 'dismissed'
+  ): Promise<AdaptationReviewItem[]> {
+    const qs = status ? `?status=${status}` : '';
+    return await this.request<AdaptationReviewItem[]>(
+      `/personalization/recommendations${qs}`
+    );
+  }
+
+  async reviewAdaptationRecommendation(
+    recommendationId: string,
+    action: 'approve' | 'dismiss'
+  ): Promise<AdaptationReviewItem> {
+    return await this.request<AdaptationReviewItem>(
+      `/personalization/recommendations/${recommendationId}/review`,
+      { method: 'POST', body: JSON.stringify({ action }) }
+    );
   }
 
   // --------------------------------------------------------------------------

@@ -16,7 +16,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.dependencies import require_roles
+from app.dependencies import require_permissions, require_roles
 from models.admin import (
     UserRoleAssignPayload,
     UserStatusUpdatePayload,
@@ -64,6 +64,7 @@ def list_interaction_configs(
     response_model=InteractionConfigurationRead,
     status_code=status.HTTP_201_CREATED,
     summary="Create interaction configuration",
+dependencies=[Depends(require_permissions("admin:config"))],
 )
 def create_interaction_config(
     payload: InteractionConfigurationCreate,
@@ -101,6 +102,7 @@ def get_interaction_config(
     response_model=InteractionConfigurationRead,
     status_code=status.HTTP_200_OK,
     summary="Update interaction configuration",
+dependencies=[Depends(require_permissions("admin:config"))],
 )
 def update_interaction_config(
     config_id: UUID,
@@ -124,6 +126,7 @@ def update_interaction_config(
     "/configs/{config_id}",
     status_code=status.HTTP_200_OK,
     summary="Delete interaction configuration",
+dependencies=[Depends(require_permissions("admin:config"))],
 )
 def delete_interaction_config(
     config_id: UUID,

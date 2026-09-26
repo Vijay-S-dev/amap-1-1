@@ -44,6 +44,7 @@ def test_admin_configs_crud_and_audit():
         "organization_id": org_id,
         "name": "Station A Preset",
         "description": "High noise preset",
+        "config_data": {"dwell_time_ms": 600},
         "status": "active",
         "created_at": now,
         "updated_at": now,

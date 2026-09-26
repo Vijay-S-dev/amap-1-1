@@ -104,6 +104,7 @@ class AdminService:
             name=payload.name,
             description=payload.description,
             status=payload.status.value if hasattr(payload.status, "value") else str(payload.status),
+            config_data=payload.config_data or {},
         )
 
         # Emit audit record
@@ -121,7 +122,7 @@ class AdminService:
             organization_id=created["organization_id"],
             name=created["name"],
             description=created.get("description"),
-            config_data=payload.config_data or {},
+            config_data=created.get("config_data") or {},
             status=created.get("status", "active"),
             created_at=created["created_at"],
             updated_at=created["updated_at"],
@@ -145,11 +146,17 @@ class AdminService:
             payload.status.value if hasattr(payload.status, "value") else str(payload.status)
         ) if payload.status is not None else existing.get("status", "active")
 
+        new_config_data = (
+            payload.config_data if payload.config_data is not None
+            else existing.get("config_data") or {}
+        )
+
         updated = self.configs_repo.update(
             interaction_configuration_id=config_id,
             name=new_name,
             description=new_desc,
             status=new_status,
+            config_data=new_config_data,
         )
 
         self.audit_repo.create(
@@ -158,7 +165,7 @@ class AdminService:
             event_type="interaction_config.updated",
             resource_type="interaction_configuration",
             resource_id=config_id,
-            event_data={"name": new_name, "status": new_status},
+            event_data={"name": new_name, "status": new_status, "config_data": new_config_data},
         )
 
         return InteractionConfigurationRead(
@@ -166,7 +173,7 @@ class AdminService:
             organization_id=updated["organization_id"],
             name=updated["name"],
             description=updated.get("description"),
-            config_data=payload.config_data or existing.get("config_data") or {},
+            config_data=updated.get("config_data") or {},
             status=updated.get("status", "active"),
             created_at=updated["created_at"],
             updated_at=updated["updated_at"],
