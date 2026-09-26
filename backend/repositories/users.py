@@ -70,6 +70,55 @@ class UsersRepository:
                 )
                 return list(cursor.fetchall())
 
+    def list_organization_supervisors(
+        self,
+        organization_id: UUID,
+    ) -> list[dict[str, Any]]:
+        """
+        Return all supervisor-role users in an organization with their primary
+        department and a real count of active workers sharing that department.
+        """
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        u.id,
+                        u.email,
+                        u.full_name,
+                        u.status,
+                        u.created_at,
+                        d.id AS department_id,
+                        d.name AS department_name,
+                        (
+                            SELECT COUNT(DISTINCT wp.id)
+                            FROM worker_profiles wp
+                            JOIN users wu ON wu.id = wp.user_id
+                            JOIN user_roles wur ON wur.user_id = wu.id
+                            JOIN roles wr ON wr.id = wur.role_id AND wr.name = 'worker'
+                            JOIN user_departments wud ON wud.user_id = wu.id
+                            WHERE wud.department_id = ud.department_id
+                              AND wu.status = 'active'
+                              AND wp.status = 'active'
+                        ) AS assigned_workers_count
+                    FROM users u
+                    JOIN user_roles ur ON ur.user_id = u.id
+                    JOIN roles r ON r.id = ur.role_id AND r.name = 'supervisor'
+                    LEFT JOIN LATERAL (
+                        SELECT department_id
+                        FROM user_departments
+                        WHERE user_id = u.id
+                        ORDER BY created_at
+                        LIMIT 1
+                    ) ud ON TRUE
+                    LEFT JOIN departments d ON d.id = ud.department_id
+                    WHERE u.organization_id = %s
+                    ORDER BY u.full_name
+                    """,
+                    (organization_id,),
+                )
+                return list(cursor.fetchall())
+
     def create(
         self,
         organization_id: UUID,

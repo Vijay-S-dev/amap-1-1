@@ -107,6 +107,12 @@ class SupervisorInvitePayload(StrictInputModel):
     full_name: str = Field(..., min_length=1, max_length=255)
     department_id: Optional[UUID] = None
     notes: Optional[str] = Field(None, max_length=500)
+    temporary_password: Optional[str] = Field(
+        None,
+        min_length=8,
+        max_length=128,
+        description="Initial credential for the invited supervisor; generated if omitted. Never returned in responses.",
+    )
 
 
 class SupervisorUpdatePayload(StrictInputModel):

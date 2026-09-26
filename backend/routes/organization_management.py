@@ -225,11 +225,16 @@ def invite_supervisor(
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> SupervisorItem:
     """Invite a new supervisor to the organization."""
-    return service.invite_supervisor(
-        organization_id=admin_user.organization_id,
-        payload=payload,
-        actor_id=admin_user.user_id,
-    )
+    try:
+        return service.invite_supervisor(
+            organization_id=admin_user.organization_id,
+            payload=payload,
+            actor_id=admin_user.user_id,
+        )
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
 @router.put(
@@ -245,12 +250,17 @@ def update_supervisor(
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> Dict[str, Any]:
     """Update supervisor department assignment or status."""
-    return service.update_supervisor(
-        organization_id=admin_user.organization_id,
-        user_id=user_id,
-        payload=payload,
-        actor_id=admin_user.user_id,
-    )
+    try:
+        return service.update_supervisor(
+            organization_id=admin_user.organization_id,
+            user_id=user_id,
+            payload=payload,
+            actor_id=admin_user.user_id,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
 # =====================================================================

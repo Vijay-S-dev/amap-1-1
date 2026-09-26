@@ -300,47 +300,22 @@ class OrganizationManagementService:
     # =========================================================================
 
     def list_supervisors(self, organization_id: UUID) -> List[SupervisorItem]:
-        """List supervisors belonging to the organization."""
-        now = datetime.now(timezone.utc)
-        depts = {d["id"]: d["name"] for d in self.depts_repo.list_by_organization(organization_id)}
-
-        users = self.users_repo.list_by_organization(organization_id)
-        supervisors = []
-        for u in users:
-            role = u.get("role") or ""
-            if "supervisor" in role.lower():
-                dept_name = "Powertrain & Gearbox Integration"
-                supervisors.append(
-                    SupervisorItem(
-                        user_id=u["id"],
-                        organization_id=organization_id,
-                        full_name=u.get("full_name") or u.get("email", "").split("@")[0].title(),
-                        email=u["email"],
-                        department_id=list(depts.keys())[0] if depts else None,
-                        department_name=dept_name,
-                        status=u.get("status", "active"),
-                        assigned_workers_count=3,
-                        created_at=u.get("created_at") or now,
-                    )
-                )
-
-        if not supervisors:
-            # Fallback default supervisor for seed
-            supervisors.append(
-                SupervisorItem(
-                    user_id=UUID("c0000000-0000-0000-0000-000000000002"),
-                    organization_id=organization_id,
-                    full_name="Marcus Vance",
-                    email="supervisor@amap.com",
-                    department_id=list(depts.keys())[0] if depts else None,
-                    department_name="Powertrain & Gearbox Integration",
-                    status="active",
-                    assigned_workers_count=3,
-                    created_at=now,
-                )
+        """List supervisors from PostgreSQL with real department and worker counts."""
+        rows = self.users_repo.list_organization_supervisors(organization_id)
+        return [
+            SupervisorItem(
+                user_id=row["id"],
+                organization_id=organization_id,
+                full_name=row["full_name"],
+                email=row["email"],
+                department_id=row.get("department_id"),
+                department_name=row.get("department_name") or "Unassigned",
+                status=row["status"],
+                assigned_workers_count=int(row.get("assigned_workers_count") or 0),
+                created_at=row["created_at"],
             )
-
-        return supervisors
+            for row in rows
+        ]
 
     def invite_supervisor(
         self,
@@ -348,34 +323,85 @@ class OrganizationManagementService:
         payload: SupervisorInvitePayload,
         actor_id: UUID,
     ) -> SupervisorItem:
-        """Invite a new floor supervisor to an organization department."""
-        now = datetime.now(timezone.utc)
-        dept_name = "Unassigned"
+        """
+        Create a real supervisor account: persists user, department assignment,
+        and supervisor role in PostgreSQL. Duplicate email -> ConflictError (409).
+        """
+        email = payload.email.strip().lower()
+
+        existing = self.users_repo.get_by_email(organization_id, email)
+        if existing:
+            raise ConflictError(
+                f"A user with email '{email}' already exists in this organization."
+            )
+
+        dept = None
         if payload.department_id:
             dept = self.depts_repo.get_by_id(payload.department_id)
-            if dept and dept["organization_id"] == organization_id:
-                dept_name = dept["name"]
+            if not dept or dept["organization_id"] != organization_id:
+                raise ValidationError("Department does not exist in this organization.")
 
-        new_user_id = uuid4()
+        initial_password = payload.temporary_password or secrets.token_urlsafe(24)
+        password_hash = hash_password(initial_password)
+
+        try:
+            user = self.users_repo.create(
+                organization_id=organization_id,
+                email=email,
+                full_name=payload.full_name,
+                password_hash=password_hash,
+            )
+        except errors.UniqueViolation as exc:
+            raise ConflictError(
+                f"A user with email '{email}' already exists in this organization."
+            ) from exc
+
+        try:
+            if dept:
+                self.user_departments_repo.create(
+                    user_id=user["id"],
+                    department_id=dept["id"],
+                )
+
+            supervisor_role = self.roles_repo.get_by_name("supervisor")
+            if supervisor_role and not self.user_roles_repo.get(
+                user_id=user["id"], role_id=supervisor_role["id"]
+            ):
+                self.user_roles_repo.create(
+                    user_id=user["id"],
+                    role_id=supervisor_role["id"],
+                )
+        except Exception:
+            try:
+                self.users_repo.delete_by_id(user["id"])
+            except Exception:
+                pass
+            raise
+
         self.audit_repo.create(
             organization_id=organization_id,
             actor_user_id=actor_id,
             event_type="supervisor.invited",
             resource_type="user",
-            resource_id=new_user_id,
-            event_data={"email": payload.email, "full_name": payload.full_name, "department": dept_name},
+            resource_id=user["id"],
+            event_data={
+                "email": email,
+                "full_name": payload.full_name,
+                "department": dept["name"] if dept else "Unassigned",
+                "notes": payload.notes,
+            },
         )
 
         return SupervisorItem(
-            user_id=new_user_id,
+            user_id=user["id"],
             organization_id=organization_id,
-            full_name=payload.full_name,
-            email=payload.email,
-            department_id=payload.department_id,
-            department_name=dept_name,
+            full_name=user["full_name"],
+            email=user["email"],
+            department_id=dept["id"] if dept else None,
+            department_name=dept["name"] if dept else "Unassigned",
             status="invited",
             assigned_workers_count=0,
-            created_at=now,
+            created_at=user["created_at"],
         )
 
     def update_supervisor(
@@ -385,16 +411,55 @@ class OrganizationManagementService:
         payload: SupervisorUpdatePayload,
         actor_id: UUID,
     ) -> Dict[str, Any]:
-        """Update supervisor department assignment or status."""
+        """Apply real supervisor updates: department reassignment and/or status change."""
+        changes: Dict[str, Any] = {}
+
+        if not payload.model_dump(exclude_unset=True):
+            raise ValidationError("No changes supplied; provide department_id and/or status.")
+
+        user = self.users_repo.get_by_id(user_id)
+        if not user or user["organization_id"] != organization_id:
+            raise NotFoundError("Supervisor not found in this organization.")
+
+        supervisor_role = self.roles_repo.get_by_name("supervisor")
+        role_links = self.user_roles_repo.get_by_user_id(user_id)
+        if not supervisor_role or not any(
+            link["role_id"] == supervisor_role["id"] for link in role_links
+        ):
+            raise NotFoundError("User is not a supervisor in this organization.")
+
+        if payload.department_id is not None:
+            dept = self.depts_repo.get_by_id(payload.department_id)
+            if not dept or dept["organization_id"] != organization_id:
+                raise NotFoundError("Department not found in this organization.")
+            for link in self.user_departments_repo.get_by_user_id(user_id):
+                self.user_departments_repo.delete(
+                    user_id=user_id, department_id=link["department_id"]
+                )
+            self.user_departments_repo.create(
+                user_id=user_id, department_id=dept["id"]
+            )
+            changes["department_id"] = str(dept["id"])
+
+        if payload.status is not None:
+            if payload.status not in ("active", "suspended"):
+                raise ValidationError("status must be 'active' or 'suspended'.")
+            self.users_repo.update_status(user_id=user_id, status=payload.status)
+            changes["status"] = payload.status
+
         self.audit_repo.create(
             organization_id=organization_id,
             actor_user_id=actor_id,
             event_type="supervisor.updated",
             resource_type="user",
             resource_id=user_id,
-            event_data=payload.model_dump(exclude_unset=True),
+            event_data=changes,
         )
-        return {"message": "Supervisor details successfully updated."}
+        return {
+            "message": "Supervisor details successfully updated.",
+            "user_id": str(user_id),
+            "changes": changes,
+        }
 
     # =========================================================================
     # 5. Worker Management (§ 10, § 11, § 13)
