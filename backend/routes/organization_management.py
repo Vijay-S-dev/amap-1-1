@@ -351,16 +351,21 @@ def create_workflow(
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> WorkflowTemplate:
     """Create approved workflow template with step sequences."""
-    return service.create_workflow(
-        organization_id=admin_user.organization_id,
-        payload=payload,
-        actor_id=admin_user.user_id,
-    )
+    try:
+        return service.create_workflow(
+            organization_id=admin_user.organization_id,
+            payload=payload,
+            actor_id=admin_user.user_id,
+        )
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message)
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message)
 
 
 @router.put(
     "/workflows/{workflow_id}",
-    response_model=Dict[str, Any],
+    response_model=WorkflowTemplate,
     status_code=status.HTTP_200_OK,
     summary="Update workflow template",
 )
@@ -369,14 +374,21 @@ def update_workflow(
     payload: WorkflowUpdatePayload,
     admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
-) -> Dict[str, Any]:
-    """Update workflow template definition."""
-    return service.update_workflow(
-        organization_id=admin_user.organization_id,
-        workflow_id=workflow_id,
-        payload=payload,
-        actor_id=admin_user.user_id,
-    )
+) -> WorkflowTemplate:
+    """Update workflow template definition (persisted to PostgreSQL)."""
+    try:
+        return service.update_workflow(
+            organization_id=admin_user.organization_id,
+            workflow_id=workflow_id,
+            payload=payload,
+            actor_id=admin_user.user_id,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=exc.message)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message)
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message)
 
 
 # =====================================================================

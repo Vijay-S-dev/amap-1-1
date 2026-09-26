@@ -30,6 +30,9 @@ class WorkflowsRepository:
                         organization_id,
                         name,
                         description,
+                        department_id,
+                        version,
+                        estimated_duration_minutes,
                         status,
                         created_at,
                         updated_at
@@ -55,6 +58,9 @@ class WorkflowsRepository:
                         organization_id,
                         name,
                         description,
+                        department_id,
+                        version,
+                        estimated_duration_minutes,
                         status,
                         created_at,
                         updated_at
@@ -80,6 +86,9 @@ class WorkflowsRepository:
                         organization_id,
                         name,
                         description,
+                        department_id,
+                        version,
+                        estimated_duration_minutes,
                         status,
                         created_at,
                         updated_at
@@ -102,6 +111,9 @@ class WorkflowsRepository:
                         organization_id,
                         name,
                         description,
+                        department_id,
+                        version,
+                        estimated_duration_minutes,
                         status,
                         created_at,
                         updated_at
@@ -117,6 +129,9 @@ class WorkflowsRepository:
         name: str,
         description: str | None = None,
         status: str = "active",
+        department_id: UUID | None = None,
+        version: int = 1,
+        estimated_duration_minutes: float = 15.0,
     ) -> dict[str, Any]:
         """Create and return a workflow."""
         with get_db_connection() as connection:
@@ -127,14 +142,20 @@ class WorkflowsRepository:
                         organization_id,
                         name,
                         description,
+                        department_id,
+                        version,
+                        estimated_duration_minutes,
                         status
                     )
-                    VALUES (%s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
                     RETURNING
                         id,
                         organization_id,
                         name,
                         description,
+                        department_id,
+                        version,
+                        estimated_duration_minutes,
                         status,
                         created_at,
                         updated_at
@@ -143,6 +164,9 @@ class WorkflowsRepository:
                         organization_id,
                         name,
                         description,
+                        department_id,
+                        version,
+                        estimated_duration_minutes,
                         status,
                     ),
                 )
@@ -158,8 +182,16 @@ class WorkflowsRepository:
         name: str,
         description: str | None,
         status: str,
+        department_id: UUID | None = None,
+        version: int | None = None,
+        estimated_duration_minutes: float | None = None,
     ) -> dict[str, Any] | None:
-        """Update and return a workflow, or None if it does not exist."""
+        """Update and return a workflow, or None if it does not exist.
+
+        ``department_id`` is written as passed (``None`` clears ownership).
+        ``version``/``estimated_duration_minutes`` keep their current value
+        when ``None`` is passed.
+        """
         with get_db_connection() as connection:
             with connection.cursor(row_factory=dict_row) as cursor:
                 cursor.execute(
@@ -168,6 +200,9 @@ class WorkflowsRepository:
                     SET
                         name = %s,
                         description = %s,
+                        department_id = %s,
+                        version = COALESCE(%s, version),
+                        estimated_duration_minutes = COALESCE(%s, estimated_duration_minutes),
                         status = %s,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
@@ -176,6 +211,9 @@ class WorkflowsRepository:
                         organization_id,
                         name,
                         description,
+                        department_id,
+                        version,
+                        estimated_duration_minutes,
                         status,
                         created_at,
                         updated_at
@@ -183,6 +221,9 @@ class WorkflowsRepository:
                     (
                         name,
                         description,
+                        department_id,
+                        version,
+                        estimated_duration_minutes,
                         status,
                         workflow_id,
                     ),

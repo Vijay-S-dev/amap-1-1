@@ -44,6 +44,7 @@ from repositories.users import UsersRepository
 from repositories.worker_readiness import WorkerReadinessRepository
 from repositories.worker_profiles import WorkerProfilesRepository
 from repositories.workflows import WorkflowsRepository
+from repositories.workflow_steps import WorkflowStepsRepository
 from services.base import ConflictError, NotFoundError, ValidationError
 from utils.security import hash_password
 
@@ -58,6 +59,7 @@ class OrganizationManagementService:
         users_repo: Optional[UsersRepository] = None,
         workers_repo: Optional[WorkerProfilesRepository] = None,
         workflows_repo: Optional[WorkflowsRepository] = None,
+        workflow_steps_repo: Optional[WorkflowStepsRepository] = None,
         audit_repo: Optional[AuditEventsRepository] = None,
         assistance_repo: Optional[AssistanceRequestsRepository] = None,
         user_departments_repo: Optional[UserDepartmentsRepository] = None,
@@ -70,6 +72,7 @@ class OrganizationManagementService:
         self.users_repo = users_repo or UsersRepository()
         self.workers_repo = workers_repo or WorkerProfilesRepository()
         self.workflows_repo = workflows_repo or WorkflowsRepository()
+        self.workflow_steps_repo = workflow_steps_repo or WorkflowStepsRepository()
         self.audit_repo = audit_repo or AuditEventsRepository()
         self.assistance_repo = assistance_repo or AssistanceRequestsRepository()
         self.user_departments_repo = user_departments_repo or UserDepartmentsRepository()
@@ -668,115 +671,70 @@ class OrganizationManagementService:
     # 6. Enterprise Workflows & Task Templates (§ 14, § 16)
     # =========================================================================
 
-    def list_workflows(self, organization_id: UUID) -> List[WorkflowTemplate]:
-        """List enterprise workflow templates."""
-        now = datetime.now(timezone.utc)
-        return [
-            WorkflowTemplate(
-                id=UUID("e0000000-0000-0000-0000-000000000001"),
-                organization_id=organization_id,
-                name="Inverter Sub-Assembly Alpha",
-                description="Precision power electronics mounting, busbar sequence, and high-voltage isolation QA.",
-                department_name="Powertrain & Gearbox Integration",
-                version=1,
-                status="active",
-                step_count=3,
-                estimated_duration_minutes=18.5,
-                steps=[
-                    WorkflowStepItem(
-                        step_number=1,
-                        title="Optical Component Inspection",
-                        instruction="Verify thermal paste application and capacitor polarity on PCB bed.",
-                        is_safety_critical=False,
-                        expected_duration_seconds=120,
-                        required_intent="NEXT_STEP",
-                    ),
-                    WorkflowStepItem(
-                        step_number=2,
-                        title="Primary Busbar Torquing",
-                        instruction="Align copper busbar and torque M6 fasteners to 9.2 Nm in star pattern.",
-                        is_safety_critical=False,
-                        expected_duration_seconds=240,
-                        required_intent="CONFIRM",
-                    ),
-                    WorkflowStepItem(
-                        step_number=3,
-                        title="High Voltage Isolation Check",
-                        instruction="Connect dielectric probe to safety terminal and engage automated 500V test.",
-                        is_safety_critical=True,
-                        expected_duration_seconds=180,
-                        required_intent="EXECUTE_CYCLE",
-                    ),
-                ],
-                created_at=now,
-                updated_at=now,
-            ),
-            WorkflowTemplate(
-                id=UUID("e0000000-0000-0000-0000-000000000002"),
-                organization_id=organization_id,
-                name="High-Voltage Isolation Check",
-                description="Dielectric insulation resistance check and automated ground bonding verification.",
-                department_name="Quality Control & Diagnostics",
-                version=1,
-                status="active",
-                step_count=2,
-                estimated_duration_minutes=12.0,
-                steps=[
-                    WorkflowStepItem(
-                        step_number=1,
-                        title="Ground Bond Verification",
-                        instruction="Attach 25A ground probe to structural chassis ground lug.",
-                        is_safety_critical=True,
-                        expected_duration_seconds=120,
-                    ),
-                    WorkflowStepItem(
-                        step_number=2,
-                        title="Dielectric Safety Probe",
-                        instruction="Execute 1000V DC hipot isolation check across DC bus terminals.",
-                        is_safety_critical=True,
-                        expected_duration_seconds=180,
-                    ),
-                ],
-                created_at=now,
-                updated_at=now,
-            ),
-            WorkflowTemplate(
-                id=UUID("e0000000-0000-0000-0000-000000000003"),
-                organization_id=organization_id,
-                name="Planetary Gearbox Assembly",
-                description="High-torque reduction gear calibration and planetary bearing seat sequence.",
-                department_name="Powertrain & Gearbox Integration",
-                version=2,
-                status="active",
-                step_count=3,
-                estimated_duration_minutes=25.0,
-                steps=[
-                    WorkflowStepItem(
-                        step_number=1,
-                        title="Alignment Pin Check",
-                        instruction="Insert hardened alignment pins into carrier housing.",
-                        is_safety_critical=False,
-                        expected_duration_seconds=180,
-                    ),
-                    WorkflowStepItem(
-                        step_number=2,
-                        title="Sun Gear Torquing",
-                        instruction="Torque central sun gear to 45.0 Nm with digital torque feedback.",
-                        is_safety_critical=False,
-                        expected_duration_seconds=300,
-                    ),
-                    WorkflowStepItem(
-                        step_number=3,
-                        title="Backlash Dial Gauge QA",
-                        instruction="Measure gear lash within 0.05mm tolerance using optical encoder.",
-                        is_safety_critical=True,
-                        expected_duration_seconds=240,
-                    ),
-                ],
-                created_at=now,
-                updated_at=now,
-            ),
+    def _workflow_item(self, wf_row: Dict[str, Any]) -> WorkflowTemplate:
+        """Build a WorkflowTemplate response from database rows."""
+        step_rows = self.workflow_steps_repo.list_by_workflow_id(wf_row["id"])
+        steps = [
+            WorkflowStepItem(
+                step_number=row["step_order"],
+                title=row["name"],
+                instruction=row.get("description") or "",
+                is_safety_critical=bool(row.get("is_safety_critical", False)),
+                expected_duration_seconds=int(row.get("expected_duration_seconds") or 120),
+                required_intent=row.get("required_intent"),
+            )
+            for row in sorted(step_rows, key=lambda r: r["step_order"])
         ]
+        department_id = wf_row.get("department_id")
+        department_name = None
+        if department_id:
+            dept = self.depts_repo.get_by_id(department_id)
+            if dept:
+                department_name = dept["name"]
+        return WorkflowTemplate(
+            id=wf_row["id"],
+            organization_id=wf_row["organization_id"],
+            name=wf_row["name"],
+            description=wf_row.get("description"),
+            department_id=department_id,
+            department_name=department_name,
+            version=int(wf_row.get("version") or 1),
+            status=wf_row["status"],
+            step_count=len(steps),
+            estimated_duration_minutes=float(wf_row.get("estimated_duration_minutes") or 15.0),
+            steps=steps,
+            created_at=wf_row["created_at"],
+            updated_at=wf_row["updated_at"],
+        )
+
+    @staticmethod
+    def _step_spec(raw: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate and normalise one step payload entry."""
+        title = (raw.get("title") or "").strip()
+        if not title:
+            raise ValidationError("Each workflow step requires a title.")
+        duration = raw.get("expected_duration_seconds", 120)
+        try:
+            duration = int(duration)
+        except (TypeError, ValueError):
+            raise ValidationError("expected_duration_seconds must be an integer.")
+        if duration <= 0:
+            raise ValidationError("expected_duration_seconds must be positive.")
+        intent = raw.get("required_intent")
+        if intent is not None:
+            intent = str(intent).strip() or None
+        return {
+            "title": title,
+            "instruction": raw.get("instruction") or "",
+            "is_safety_critical": bool(raw.get("is_safety_critical", False)),
+            "expected_duration_seconds": duration,
+            "required_intent": intent,
+        }
+
+    def list_workflows(self, organization_id: UUID) -> List[WorkflowTemplate]:
+        """List enterprise workflow templates (real rows + their steps)."""
+        rows = self.workflows_repo.list_by_organization_id(organization_id)
+        return [self._workflow_item(row) for row in rows]
 
     def create_workflow(
         self,
@@ -784,52 +742,78 @@ class OrganizationManagementService:
         payload: WorkflowCreatePayload,
         actor_id: UUID,
     ) -> WorkflowTemplate:
-        """Define an approved organization assembly workflow template."""
-        now = datetime.now(timezone.utc)
-        wf_id = uuid4()
+        """Define an approved organization assembly workflow template.
 
-        dept_name = "General Assembly"
+        The workflow and every step are persisted to PostgreSQL. A duplicate
+        name (pre-check or unique-index race) is a 409 conflict.
+        """
+        department_id = None
         if payload.department_id:
             dept = self.depts_repo.get_by_id(payload.department_id)
-            if dept and dept["organization_id"] == organization_id:
-                dept_name = dept["name"]
+            if not dept or dept["organization_id"] != organization_id:
+                raise ValidationError("Unknown department for this organization.")
+            department_id = dept["id"]
 
-        steps = [
-            WorkflowStepItem(
-                step_number=i + 1,
-                title=s.get("title", f"Step {i + 1}"),
-                instruction=s.get("instruction", ""),
-                is_safety_critical=s.get("is_safety_critical", False),
-                expected_duration_seconds=s.get("expected_duration_seconds", 120),
-                required_intent=s.get("required_intent"),
+        specs = [self._step_spec(step) for step in payload.steps]
+        estimated = float(payload.estimated_duration_minutes or 15.0)
+        if estimated <= 0:
+            raise ValidationError("estimated_duration_minutes must be positive.")
+
+        existing = self.workflows_repo.get_by_organization_and_name(organization_id, payload.name)
+        if existing:
+            raise ConflictError(f"A workflow named '{payload.name}' already exists.")
+
+        workflow_row: Dict[str, Any] | None = None
+        created_step_ids: List[UUID] = []
+        try:
+            workflow_row = self.workflows_repo.create(
+                organization_id=organization_id,
+                name=payload.name,
+                description=payload.description,
+                status="active",
+                department_id=department_id,
+                version=1,
+                estimated_duration_minutes=estimated,
             )
-            for i, s in enumerate(payload.steps)
-        ]
+            for index, spec in enumerate(specs, start=1):
+                step_row = self.workflow_steps_repo.create(
+                    workflow_id=workflow_row["id"],
+                    step_order=index,
+                    name=spec["title"],
+                    description=spec["instruction"],
+                    status="active",
+                    is_safety_critical=spec["is_safety_critical"],
+                    expected_duration_seconds=spec["expected_duration_seconds"],
+                    required_intent=spec["required_intent"],
+                )
+                created_step_ids.append(step_row["id"])
+        except errors.UniqueViolation:
+            # Duplicate (organization_id, name) raced past the pre-check.
+            raise ConflictError(f"A workflow named '{payload.name}' already exists.")
+        except Exception:
+            # Partial failure: remove any rows already written (separate
+            # connections per repo call, so no transaction rolls back for us).
+            for step_id in created_step_ids:
+                try:
+                    self.workflow_steps_repo.delete_by_id(step_id)
+                except Exception:
+                    pass
+            if workflow_row is not None:
+                try:
+                    self.workflows_repo.delete_by_id(workflow_row["id"])
+                except Exception:
+                    pass
+            raise
 
         self.audit_repo.create(
             organization_id=organization_id,
             actor_user_id=actor_id,
             event_type="workflow.created",
             resource_type="workflow",
-            resource_id=wf_id,
-            event_data={"name": payload.name, "step_count": len(steps)},
+            resource_id=workflow_row["id"],
+            event_data={"name": payload.name, "step_count": len(specs)},
         )
-
-        return WorkflowTemplate(
-            id=wf_id,
-            organization_id=organization_id,
-            name=payload.name,
-            description=payload.description,
-            department_id=payload.department_id,
-            department_name=dept_name,
-            version=1,
-            status="active",
-            step_count=len(steps),
-            estimated_duration_minutes=payload.estimated_duration_minutes or 15.0,
-            steps=steps,
-            created_at=now,
-            updated_at=now,
-        )
+        return self._workflow_item(workflow_row)
 
     def update_workflow(
         self,
@@ -837,17 +821,111 @@ class OrganizationManagementService:
         workflow_id: UUID,
         payload: WorkflowUpdatePayload,
         actor_id: UUID,
-    ) -> Dict[str, Any]:
-        """Update approved workflow configuration."""
+    ) -> WorkflowTemplate:
+        """Update an approved workflow definition — persisted, not audit-only."""
+        wf = self.workflows_repo.get_by_id(workflow_id)
+        if not wf or wf["organization_id"] != organization_id:
+            raise NotFoundError("Workflow not found.")
+
+        changes = payload.model_dump(exclude_unset=True)
+        name = changes.get("name", wf["name"])
+        description = changes.get("description", wf.get("description"))
+        status_value = changes.get("status", wf["status"])
+        if status_value not in ("active", "inactive", "archived"):
+            raise ValidationError("status must be one of: active, inactive, archived.")
+
+        department_id = wf.get("department_id")
+        if "department_id" in changes:
+            new_dept = changes["department_id"]
+            if new_dept is None:
+                department_id = None
+            else:
+                dept = self.depts_repo.get_by_id(new_dept)
+                if not dept or dept["organization_id"] != organization_id:
+                    raise ValidationError("Unknown department for this organization.")
+                department_id = dept["id"]
+
+        if "name" in changes and name != wf["name"]:
+            clash = self.workflows_repo.get_by_organization_and_name(organization_id, name)
+            if clash and clash["id"] != workflow_id:
+                raise ConflictError(f"A workflow named '{name}' already exists.")
+
+        try:
+            updated = self.workflows_repo.update(
+                workflow_id,
+                name=name,
+                description=description,
+                status=status_value,
+                department_id=department_id,
+                version=int(wf.get("version") or 1) + 1,
+                estimated_duration_minutes=wf.get("estimated_duration_minutes") or 15.0,
+            )
+        except errors.UniqueViolation:
+            raise ConflictError(f"A workflow named '{name}' already exists.")
+        if not updated:
+            raise NotFoundError("Workflow not found.")
+
+        step_count = None
+        if changes.get("steps") is not None:
+            specs = [self._step_spec(step) for step in changes["steps"]]
+            self._replace_steps(workflow_id, specs)
+            step_count = len(specs)
+
         self.audit_repo.create(
             organization_id=organization_id,
             actor_user_id=actor_id,
             event_type="workflow.updated",
             resource_type="workflow",
             resource_id=workflow_id,
-            event_data=payload.model_dump(exclude_unset=True),
+            event_data={
+                "changed": sorted(changes.keys()),
+                "step_count": step_count,
+            },
         )
-        return {"message": "Workflow template successfully updated."}
+        return self._workflow_item(updated)
+
+    def _replace_steps(self, workflow_id: UUID, specs: List[Dict[str, Any]]) -> None:
+        """Sync workflow_steps to exactly ``specs`` (ordered 1..N).
+
+        Steps with execution history cannot be removed — the foreign key
+        surfaces that as a 409 instead of silent data loss.
+        """
+        existing = self.workflow_steps_repo.list_by_workflow_id(workflow_id)
+        by_order = {row["step_order"]: row for row in existing}
+
+        try:
+            for order in sorted(by_order):
+                if order > len(specs):
+                    self.workflow_steps_repo.delete_by_id(by_order[order]["id"])
+            for index, spec in enumerate(specs, start=1):
+                match = by_order.get(index)
+                if match:
+                    self.workflow_steps_repo.update(
+                        match["id"],
+                        step_order=index,
+                        name=spec["title"],
+                        description=spec["instruction"],
+                        status="active",
+                        is_safety_critical=spec["is_safety_critical"],
+                        expected_duration_seconds=spec["expected_duration_seconds"],
+                        required_intent=spec["required_intent"],
+                    )
+                else:
+                    self.workflow_steps_repo.create(
+                        workflow_id=workflow_id,
+                        step_order=index,
+                        name=spec["title"],
+                        description=spec["instruction"],
+                        status="active",
+                        is_safety_critical=spec["is_safety_critical"],
+                        expected_duration_seconds=spec["expected_duration_seconds"],
+                        required_intent=spec["required_intent"],
+                    )
+        except errors.ForeignKeyViolation:
+            raise ConflictError(
+                "Workflow steps with execution history cannot be removed. "
+                "Create a new workflow instead."
+            )
 
     # =========================================================================
     # 7. Assistance Overview & Emergency Events (§ 19, § 20)

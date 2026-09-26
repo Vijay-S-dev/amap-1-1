@@ -50,6 +50,7 @@ def mock_service() -> OrganizationManagementService:
         users_repo=MagicMock(),
         workers_repo=MagicMock(),
         workflows_repo=MagicMock(),
+        workflow_steps_repo=MagicMock(),
         audit_repo=MagicMock(),
         assistance_repo=MagicMock(),
         user_departments_repo=MagicMock(),
@@ -87,6 +88,83 @@ def mock_service() -> OrganizationManagementService:
         "created_at": now,
         "updated_at": now,
     }
+
+    # list/create/update workflows now read the real repositories: give the
+    # workflow repo a seed row and keep steps in an in-memory store so the
+    # contract tests stay deterministic.
+    seed_workflow_id = uuid4()
+    created_workflow_id = uuid4()
+    workflow_steps_store: dict = {seed_workflow_id: []}
+    service.workflows_repo.list_by_organization_id.return_value = [
+        {
+            "id": seed_workflow_id,
+            "organization_id": ORG_A_ID,
+            "name": "Seeded Assembly Workflow",
+            "description": "Fixture workflow row",
+            "department_id": None,
+            "version": 1,
+            "estimated_duration_minutes": 15.0,
+            "status": "active",
+            "created_at": now,
+            "updated_at": now,
+        }
+    ]
+    service.workflows_repo.get_by_organization_and_name.return_value = None
+
+    def _fake_create_workflow(
+        organization_id,
+        name,
+        description=None,
+        status="active",
+        department_id=None,
+        version=1,
+        estimated_duration_minutes=15.0,
+    ):
+        return {
+            "id": created_workflow_id,
+            "organization_id": organization_id,
+            "name": name,
+            "description": description,
+            "department_id": department_id,
+            "version": version,
+            "estimated_duration_minutes": estimated_duration_minutes,
+            "status": status,
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    service.workflows_repo.create.side_effect = _fake_create_workflow
+
+    def _fake_create_workflow_step(
+        workflow_id,
+        step_order,
+        name,
+        description=None,
+        status="active",
+        is_safety_critical=False,
+        expected_duration_seconds=120,
+        required_intent=None,
+    ):
+        row = {
+            "id": uuid4(),
+            "workflow_id": workflow_id,
+            "step_order": step_order,
+            "name": name,
+            "description": description,
+            "is_safety_critical": is_safety_critical,
+            "expected_duration_seconds": expected_duration_seconds,
+            "required_intent": required_intent,
+            "status": status,
+            "created_at": now,
+            "updated_at": now,
+        }
+        workflow_steps_store.setdefault(workflow_id, []).append(row)
+        return row
+
+    service.workflow_steps_repo.create.side_effect = _fake_create_workflow_step
+    service.workflow_steps_repo.list_by_workflow_id.side_effect = (
+        lambda workflow_id: workflow_steps_store.get(workflow_id, [])
+    )
     return service
 
 

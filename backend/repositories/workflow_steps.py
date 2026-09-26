@@ -31,6 +31,9 @@ class WorkflowStepsRepository:
                         step_order,
                         name,
                         description,
+                        is_safety_critical,
+                        expected_duration_seconds,
+                        required_intent,
                         status,
                         created_at,
                         updated_at
@@ -57,6 +60,9 @@ class WorkflowStepsRepository:
                         step_order,
                         name,
                         description,
+                        is_safety_critical,
+                        expected_duration_seconds,
+                        required_intent,
                         status,
                         created_at,
                         updated_at
@@ -83,6 +89,9 @@ class WorkflowStepsRepository:
                         step_order,
                         name,
                         description,
+                        is_safety_critical,
+                        expected_duration_seconds,
+                        required_intent,
                         status,
                         created_at,
                         updated_at
@@ -106,6 +115,9 @@ class WorkflowStepsRepository:
                         step_order,
                         name,
                         description,
+                        is_safety_critical,
+                        expected_duration_seconds,
+                        required_intent,
                         status,
                         created_at,
                         updated_at
@@ -122,6 +134,9 @@ class WorkflowStepsRepository:
         name: str,
         description: str | None = None,
         status: str = "active",
+        is_safety_critical: bool = False,
+        expected_duration_seconds: int = 120,
+        required_intent: str | None = None,
     ) -> dict[str, Any]:
         """Create and return a workflow step."""
         with get_db_connection() as connection:
@@ -133,15 +148,21 @@ class WorkflowStepsRepository:
                         step_order,
                         name,
                         description,
+                        is_safety_critical,
+                        expected_duration_seconds,
+                        required_intent,
                         status
                     )
-                    VALUES (%s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING
                         id,
                         workflow_id,
                         step_order,
                         name,
                         description,
+                        is_safety_critical,
+                        expected_duration_seconds,
+                        required_intent,
                         status,
                         created_at,
                         updated_at
@@ -151,6 +172,9 @@ class WorkflowStepsRepository:
                         step_order,
                         name,
                         description,
+                        is_safety_critical,
+                        expected_duration_seconds,
+                        required_intent,
                         status,
                     ),
                 )
@@ -167,6 +191,9 @@ class WorkflowStepsRepository:
         name: str,
         description: str | None,
         status: str,
+        is_safety_critical: bool = False,
+        expected_duration_seconds: int = 120,
+        required_intent: str | None = None,
     ) -> dict[str, Any] | None:
         """Update and return a workflow step, or None if it does not exist."""
         with get_db_connection() as connection:
@@ -178,6 +205,9 @@ class WorkflowStepsRepository:
                         step_order = %s,
                         name = %s,
                         description = %s,
+                        is_safety_critical = %s,
+                        expected_duration_seconds = %s,
+                        required_intent = %s,
                         status = %s,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id = %s
@@ -187,6 +217,9 @@ class WorkflowStepsRepository:
                         step_order,
                         name,
                         description,
+                        is_safety_critical,
+                        expected_duration_seconds,
+                        required_intent,
                         status,
                         created_at,
                         updated_at
@@ -195,6 +228,9 @@ class WorkflowStepsRepository:
                         step_order,
                         name,
                         description,
+                        is_safety_critical,
+                        expected_duration_seconds,
+                        required_intent,
                         status,
                         workflow_step_id,
                     ),
