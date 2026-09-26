@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.dependencies import get_current_user
 from models.auth import AuthenticatedUserContext
+from repositories.audit_events import AuditEventsRepository
 from models.gesture import (
     CustomGestureProfileRead,
     CustomGestureTestPayload,
@@ -47,12 +48,38 @@ def process_frame(
 ) -> GestureRecognitionResult:
     """
     Classify 21 hand landmark points into discrete gestures (standard or custom) and accumulate dwell progress.
-    Returns recognition result and trigger status.
+    Returns recognition result and trigger status. Fired triggers are audited to PostgreSQL.
     """
-    return service.process_frame(
+    result = service.process_frame(
         payload=payload,
         worker_profile_id=current_user.worker_profile_id,
     )
+    if result.is_triggered:
+        # Durable evidence that a camera frame flowed through the gesture
+        # pipeline and fired (beyond any downstream action execution).
+        try:
+            AuditEventsRepository().create(
+                organization_id=current_user.organization_id,
+                actor_user_id=current_user.user_id,
+                event_type="gesture.recognized",
+                resource_type="gesture",
+                resource_id=current_user.worker_profile_id,
+                event_data={
+                    "gesture": result.detected_gesture,
+                    "is_custom": result.is_custom,
+                    "custom_gesture_id": str(result.custom_gesture_id)
+                    if result.custom_gesture_id
+                    else None,
+                    "confidence": result.confidence,
+                    "action_mapping": result.action_mapping,
+                    "handedness": payload.handedness,
+                },
+            )
+        except Exception:  # pragma: no cover - audit must not break recognition
+            import logging
+
+            logging.getLogger(__name__).exception("Failed to audit gesture trigger")
+    return result
 
 
 @router.post(

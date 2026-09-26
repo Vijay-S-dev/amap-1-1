@@ -342,6 +342,28 @@ class ApiClient {
     });
   }
 
+  // Phase 12: stream camera-frame landmarks through the server gesture pipeline
+  async processGestureFrame(payload: {
+    landmarks: { x: number; y: number; z?: number }[];
+    handedness: 'Right' | 'Left';
+    timestamp_ms: number;
+    dwell_time_ms?: number;
+  }): Promise<{
+    detected_gesture: string | null;
+    confidence: number;
+    is_triggered: boolean;
+    dwell_progress: number;
+    action_mapping: string | null;
+    is_custom: boolean;
+    custom_gesture_id: string | null;
+    message: string;
+  }> {
+    return await this.request('/gestures/process-frame', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getCustomGestures(): Promise<CustomGestureProfile[]> {
     return await this.request<CustomGestureProfile[]>('/gestures/custom');
   }

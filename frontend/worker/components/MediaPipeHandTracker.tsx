@@ -256,6 +256,7 @@ export interface HandTrackerProps {
   showLabels?: boolean;
   requiredDwellMs?: number;
   onGestureConfirmed?: (gesture: string) => void;
+  onHandFrame?: (hands: Landmark3D[][], labels: string[]) => void;
   enabled?: boolean;
   onCameraStateChange?: (state: CameraLifecycleState, error?: string) => void;
 }
@@ -269,6 +270,7 @@ export function MediaPipeHandTracker({
   showLabels = true,
   requiredDwellMs = 500,
   onGestureConfirmed,
+  onHandFrame,
   enabled = true,
   onCameraStateChange,
 }: HandTrackerProps) {
@@ -297,6 +299,7 @@ export function MediaPipeHandTracker({
     onLandmarksDetected,
     onHandPresenceChange,
     onGestureConfirmed,
+    onHandFrame,
     onCameraStateChange,
     requiredDwellMs,
   });
@@ -307,6 +310,7 @@ export function MediaPipeHandTracker({
       onLandmarksDetected,
       onHandPresenceChange,
       onGestureConfirmed,
+      onHandFrame,
       onCameraStateChange,
       requiredDwellMs,
     };
@@ -482,7 +486,7 @@ export function MediaPipeHandTracker({
 
         // 1. Initialize WebAssembly Tasks Vision Resolver
         const vision = await FilesetResolver.forVisionTasks(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+          '/mediapipe/wasm'
         );
 
         if (!isComponentMounted) return;
@@ -490,7 +494,7 @@ export function MediaPipeHandTracker({
         // 2. Initialize Dual-Hand Landmarker (numHands: 2)
         handLandmarkerInstance = await HandLandmarker.createFromOptions(vision, {
           baseOptions: {
-            modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+            modelAssetPath: '/mediapipe/hand_landmarker.task',
             delegate: 'GPU',
           },
           runningMode: 'VIDEO',
@@ -680,6 +684,7 @@ export function MediaPipeHandTracker({
               const cb = callbacksRef.current;
               if (cb.onHandPresenceChange) cb.onHandPresenceChange(true);
               if (cb.onLandmarksDetected) cb.onLandmarksDetected(multiHands[0]);
+              if (cb.onHandFrame) cb.onHandFrame(multiHands, multiHandLabels);
 
               // =========================================================================
               // STRICT LAYER 2: "WHAT ARE THE HANDS DOING?" (PHASE 4 HARDENED)

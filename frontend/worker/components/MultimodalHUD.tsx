@@ -70,6 +70,9 @@ export function MultimodalHUD({
   const lastVoiceProcessedTimeRef = useRef<number>(0);
   const isVoiceProcessingRef = useRef<boolean>(false);
   const lastPerceivedGestureRef = useRef<{ gesture: string; confidence: number; timestamp: number } | null>(null);
+  const lastGestureFrameSentRef = useRef<number>(0);
+  const gestureFrameBusyRef = useRef<boolean>(false);
+  const gestureCustomDispatchRef = useRef<number>(0);
   const lastPerceivedVoiceRef = useRef<{ action: string; command: string; confidence: number; timestamp: number } | null>(null);
   const lastDispatchedExecutionRef = useRef<{ action: string; timestamp: number } | null>(null);
 
@@ -164,6 +167,67 @@ export function MultimodalHUD({
       playAudioCue('confirm');
     },
     [announce, onActionTriggered, playAudioCue]
+  );
+
+  // Phase 12: stream tracked frames through the server gesture pipeline
+  // (dwell accumulation + worker-specific custom gesture recognition + audit).
+  const handleHandFrame = useCallback(
+    (hands: { x: number; y: number; z?: number }[][], labels: string[]) => {
+      if (!isGestureActive || hands.length === 0) return;
+      const now = Date.now();
+      if (now - lastGestureFrameSentRef.current < 120) return; // throttle upstream
+      if (gestureFrameBusyRef.current) return;
+      lastGestureFrameSentRef.current = now;
+      gestureFrameBusyRef.current = true;
+      const label = (labels[0] === 'Left' ? 'Left' : 'Right') as 'Left' | 'Right';
+      api
+        .processGestureFrame({
+          landmarks: hands[0],
+          handedness: label,
+          timestamp_ms: now,
+        })
+        .then((res) => {
+          if (res.is_triggered && res.is_custom && res.action_mapping) {
+            // Server recognized a worker-specific custom gesture: dispatch it
+            // through the same multimodal arbitration path as standard gestures.
+            if (now - gestureCustomDispatchRef.current < 1200) return;
+            gestureCustomDispatchRef.current = now;
+            lastPerceivedGestureRef.current = {
+              gesture: res.action_mapping,
+              confidence: res.confidence,
+              timestamp: now,
+            };
+            api
+              .processMultimodalIntent({
+                inputs: [
+                  {
+                    mode: 'gesture',
+                    raw_intent: res.action_mapping.toLowerCase(),
+                    confidence: res.confidence,
+                    timestamp_ms: now,
+                  },
+                ],
+                temporal_window_ms: 1500,
+              })
+              .then((fused) => processFusedMultimodalCandidate(fused, res.detected_gesture || undefined))
+              .catch((err: any) =>
+                setConflictWarning(
+                  `Custom gesture dispatch failed: ${err?.message || 'server error'}`
+                )
+              );
+          }
+        })
+        .catch((err: any) => {
+          // Surface pipeline errors — never fail silently.
+          setConflictWarning(
+            `Gesture pipeline error: ${err?.message || 'server unreachable'}`
+          );
+        })
+        .finally(() => {
+          gestureFrameBusyRef.current = false;
+        });
+    },
+    [isGestureActive, processFusedMultimodalCandidate]
   );
 
   // One-Shot Confirmed Gesture Execution (Enforces Multimodal Fusion & Release Latch)
@@ -469,6 +533,7 @@ export function MultimodalHUD({
             showLabels={false}
             requiredDwellMs={dwellTimeMs}
             enabled={isGestureActive}
+            onHandFrame={handleHandFrame}
             onCameraStateChange={handleCameraStateChange}
             onHandPresenceChange={(present) => {
               setHasHandInView(present);
