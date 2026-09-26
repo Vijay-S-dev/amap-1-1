@@ -118,8 +118,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
       - name: Prefetch local Whisper model
-        run: python3 scripts/prefetch_whisper_model.py
+        run: python scripts/prefetch_whisper_model.py
 
       - name: docker compose build
         run: docker compose build --pull
