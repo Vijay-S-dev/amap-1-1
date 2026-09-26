@@ -18,14 +18,14 @@ class AuthorizationService:
     @staticmethod
     def has_permission(user: AuthenticatedUserContext, permission: str) -> bool:
         """Check if user has a specific permission or admin override."""
-        if "admin" in user.roles or "superadmin" in user.roles:
+        if any(r in user.roles for r in ("admin", "organization_admin", "superadmin")):
             return True
         return permission in user.permissions
 
     @staticmethod
     def has_all_permissions(user: AuthenticatedUserContext, required_permissions: List[str]) -> bool:
         """Check if user has all required permissions or admin override."""
-        if "admin" in user.roles or "superadmin" in user.roles:
+        if any(r in user.roles for r in ("admin", "organization_admin", "superadmin")):
             return True
         return all(p in user.permissions for p in required_permissions)
 
@@ -51,6 +51,9 @@ class AuthorizationService:
         """Check if user can access worker profile (self or manager/supervisor/admin)."""
         if user.worker_profile_id and user.worker_profile_id == target_worker_profile_id:
             return True
-        if any(role in user.roles for role in ("admin", "superadmin", "supervisor", "manager")):
+        if any(
+            role in user.roles
+            for role in ("admin", "organization_admin", "superadmin", "supervisor", "manager")
+        ):
             return True
         return False

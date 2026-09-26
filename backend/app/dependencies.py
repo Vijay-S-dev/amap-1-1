@@ -21,7 +21,7 @@ from services.auth_service import AuthService
 from services.authorization_service import AuthorizationService
 from services.base import UnauthorizedError
 
-bearer_scheme = HTTPBearer(auto_error=True)
+bearer_scheme = HTTPBearer(auto_error=False)
 optional_bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -31,13 +31,20 @@ def get_auth_service() -> AuthService:
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     auth_service: AuthService = Depends(get_auth_service),
 ) -> AuthenticatedUserContext:
     """
     Validate the incoming Bearer JWT access token and return the AuthenticatedUserContext.
-    Raises HTTP 401 Unauthorized if invalid or expired.
+    Raises HTTP 401 Unauthorized if credentials are missing, invalid, or expired
+    (401 = not authenticated; 403 is reserved for authenticated-but-unauthorized).
     """
+    if credentials is None or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated: Bearer access token missing.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     token = credentials.credentials
     try:
         user_context = auth_service.verify_token(token)

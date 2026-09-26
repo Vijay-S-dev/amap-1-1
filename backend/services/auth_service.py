@@ -29,7 +29,7 @@ _DEV_DEMO_USERS: Dict[str, Dict[str, Any]] = {
         "organization_id": UUID("9a61e05d-7a32-4112-9c17-1833d7b42f65"),
         "email": "alex.worker@amap.com",
         "full_name": "Alex Morgan",
-        "password_hash": "pbkdf2_sha256$600000$5a80572eefda2f48d91b8a531e289bf5$715dd2475e2a229c2d1b7470d0da0970a0dc3eb9ae05b1c55d07010f37d38ae8",  # SecurePassword123!
+        "password_hash": "pbkdf2_sha256$600000$bc5ab92aba13d70295b07ec1b9619ccc$10df13a62e551e5879a3d5829abbd57ba89f49d25c78d936f2a426309971e3d9",  # SecurePassword123!
         "status": "active",
         "roles": ["worker"],
         "permissions": ["session:read", "session:write", "task:execute", "assistance:request"],
@@ -40,7 +40,7 @@ _DEV_DEMO_USERS: Dict[str, Dict[str, Any]] = {
         "organization_id": UUID("9a61e05d-7a32-4112-9c17-1833d7b42f65"),
         "email": "maria.newhire@amap.com",
         "full_name": "Maria Rodriguez",
-        "password_hash": "pbkdf2_sha256$600000$5a80572eefda2f48d91b8a531e289bf5$715dd2475e2a229c2d1b7470d0da0970a0dc3eb9ae05b1c55d07010f37d38ae8",  # SecurePassword123!
+        "password_hash": "pbkdf2_sha256$600000$bc5ab92aba13d70295b07ec1b9619ccc$10df13a62e551e5879a3d5829abbd57ba89f49d25c78d936f2a426309971e3d9",  # SecurePassword123!
         "status": "active",
         "roles": ["worker"],
         "permissions": ["session:read", "session:write", "task:execute", "assistance:request"],
@@ -51,7 +51,7 @@ _DEV_DEMO_USERS: Dict[str, Dict[str, Any]] = {
         "organization_id": UUID("9a61e05d-7a32-4112-9c17-1833d7b42f65"),
         "email": "supervisor@amap.com",
         "full_name": "Elena Rostova",
-        "password_hash": "pbkdf2_sha256$600000$5a80572eefda2f48d91b8a531e289bf5$715dd2475e2a229c2d1b7470d0da0970a0dc3eb9ae05b1c55d07010f37d38ae8",  # SecurePassword123!
+        "password_hash": "pbkdf2_sha256$600000$bc5ab92aba13d70295b07ec1b9619ccc$10df13a62e551e5879a3d5829abbd57ba89f49d25c78d936f2a426309971e3d9",  # SecurePassword123!
         "status": "active",
         "roles": ["supervisor"],
         "permissions": ["session:read", "session:write", "task:read", "assistance:manage", "worker:read"],
@@ -62,7 +62,7 @@ _DEV_DEMO_USERS: Dict[str, Dict[str, Any]] = {
         "organization_id": UUID("9a61e05d-7a32-4112-9c17-1833d7b42f65"),
         "email": "admin@amap.com",
         "full_name": "Marcus Vance",
-        "password_hash": "pbkdf2_sha256$600000$5a80572eefda2f48d91b8a531e289bf5$715dd2475e2a229c2d1b7470d0da0970a0dc3eb9ae05b1c55d07010f37d38ae8",  # SecurePassword123!
+        "password_hash": "pbkdf2_sha256$600000$bc5ab92aba13d70295b07ec1b9619ccc$10df13a62e551e5879a3d5829abbd57ba89f49d25c78d936f2a426309971e3d9",  # SecurePassword123!
         "status": "active",
         "roles": ["organization_admin", "admin"],
         "permissions": ["admin:access", "organization:write", "user:write", "workflow:write", "audit:read"],
@@ -113,8 +113,13 @@ class AuthService:
                         perm = self.permissions_repo.get_by_id(rp["permission_id"])
                         if perm and perm["name"] not in permission_names:
                             permission_names.append(perm["name"])
-        except Exception:
-            pass
+        except Exception as exc:
+            # Fail loudly: silently issuing empty roles/permissions would grant
+            # an unprivileged token and mask database failures as RBAC denials.
+            raise RuntimeError(
+                "Failed to resolve roles/permissions for user "
+                f"{user_id}; refusing to issue an unauthenticated-privilege token."
+            ) from exc
 
         return role_names, permission_names
 
@@ -208,6 +213,7 @@ class AuthService:
         """
         Decode and verify an access token, ensuring the user is active.
         """
+        settings = get_settings()
         try:
             payload = decode_access_token(token)
         except ValueError as exc:

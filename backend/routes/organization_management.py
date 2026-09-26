@@ -59,7 +59,7 @@ def get_org_management_service() -> OrganizationManagementService:
     summary="Get organization dashboard KPIs",
 )
 def get_organization_dashboard(
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> OrganizationDashboardKPIs:
     """Retrieve summarized real database metrics for the organization operational dashboard."""
@@ -77,7 +77,7 @@ def get_organization_dashboard(
     summary="Get organization profile and accessibility defaults",
 )
 def get_organization_profile(
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> OrganizationProfileRead:
     """Retrieve tenant profile and configured accessibility defaults."""
@@ -95,7 +95,7 @@ def get_organization_profile(
 )
 def update_organization_profile(
     payload: OrganizationProfileUpdate,
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> OrganizationProfileRead:
     """Update organization settings and append immutable audit log."""
@@ -120,7 +120,7 @@ def update_organization_profile(
     summary="List organization departments",
 )
 def list_departments(
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> List[DepartmentItem]:
     """List all departments belonging to the administrator's organization."""
@@ -135,7 +135,7 @@ def list_departments(
 )
 def create_department(
     payload: DepartmentCreatePayload,
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> DepartmentItem:
     """Create a new department within the tenant boundary."""
@@ -158,7 +158,7 @@ def create_department(
 def update_department(
     department_id: UUID,
     payload: DepartmentUpdatePayload,
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> DepartmentItem:
     """Update department properties enforcing organization ownership."""
@@ -181,7 +181,7 @@ def update_department(
 )
 def deactivate_department(
     department_id: UUID,
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> Dict[str, Any]:
     """Deactivate department with organization isolation."""
@@ -206,7 +206,7 @@ def deactivate_department(
     summary="List organization supervisors",
 )
 def list_supervisors(
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> List[SupervisorItem]:
     """List all floor supervisors in the organization."""
@@ -221,7 +221,7 @@ def list_supervisors(
 )
 def invite_supervisor(
     payload: SupervisorInvitePayload,
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> SupervisorItem:
     """Invite a new supervisor to the organization."""
@@ -241,7 +241,7 @@ def invite_supervisor(
 def update_supervisor(
     user_id: UUID,
     payload: SupervisorUpdatePayload,
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> Dict[str, Any]:
     """Update supervisor department assignment or status."""
@@ -268,7 +268,7 @@ def list_workers(
     page_size: int = Query(25, ge=1, le=100),
     status_filter: Optional[str] = Query(None, alias="status"),
     dept_filter: Optional[UUID] = Query(None, alias="department_id"),
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> Dict[str, Any]:
     """List workers with real operational state and pagination."""
@@ -289,7 +289,7 @@ def list_workers(
 )
 def invite_worker(
     payload: WorkerInvitePayload,
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> EnterpriseWorkerItem:
     """Generate accessible worker invitation for AMAP onboarding."""
@@ -311,7 +311,7 @@ def invite_worker(
     summary="List organization workflows",
 )
 def list_workflows(
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> List[WorkflowTemplate]:
     """List approved assembly workflow templates."""
@@ -326,7 +326,7 @@ def list_workflows(
 )
 def create_workflow(
     payload: WorkflowCreatePayload,
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> WorkflowTemplate:
     """Create approved workflow template with step sequences."""
@@ -346,7 +346,7 @@ def create_workflow(
 def update_workflow(
     workflow_id: UUID,
     payload: WorkflowUpdatePayload,
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> Dict[str, Any]:
     """Update workflow template definition."""
@@ -369,7 +369,7 @@ def update_workflow(
     summary="Get organization assistance overview",
 )
 def get_assistance_overview(
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> List[Dict[str, Any]]:
     """Retrieve organization-wide assistance requests."""
@@ -383,7 +383,7 @@ def get_assistance_overview(
     summary="Get organization emergency events",
 )
 def get_emergency_events(
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> List[Dict[str, Any]]:
     """Retrieve active emergency stop safety halts."""
@@ -397,7 +397,7 @@ def get_emergency_events(
     summary="Get organization operational & accessibility analytics",
 )
 def get_organization_analytics(
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> OrganizationAnalyticsSummary:
     """Retrieve aggregate non-medical operational and accessibility readiness analytics."""
@@ -412,7 +412,7 @@ def get_organization_analytics(
 )
 def query_audit_logs(
     limit: int = Query(50, ge=1, le=200),
-    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "super_admin")),
+    admin_user: AuthenticatedUserContext = Depends(require_roles("admin", "organization_admin", "super_admin")),
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> List[OrganizationAuditEventItem]:
     """Query immutable audit events for the organization."""

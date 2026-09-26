@@ -80,7 +80,7 @@ def create_request(
     response_model=AssistanceRequestRead,
     status_code=status.HTTP_200_OK,
     summary="Acknowledge an assistance request",
-    dependencies=[Depends(require_roles("supervisor", "manager", "admin"))],
+    dependencies=[Depends(require_roles("supervisor", "manager", "admin", "organization_admin"))],
 )
 def acknowledge_request(
     request_id: UUID,
@@ -104,7 +104,7 @@ def acknowledge_request(
     response_model=AssistanceRequestRead,
     status_code=status.HTTP_200_OK,
     summary="Resolve an assistance request",
-    dependencies=[Depends(require_roles("supervisor", "manager", "admin"))],
+    dependencies=[Depends(require_roles("supervisor", "manager", "admin", "organization_admin"))],
 )
 def resolve_request(
     request_id: UUID,

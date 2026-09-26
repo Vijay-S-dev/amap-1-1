@@ -36,6 +36,9 @@ def register_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=_error_body(str(exc.detail), request),
+            # Preserve headers set on the exception (e.g. WWW-Authenticate for 401,
+            # Allow for 405). Dropping them breaks HTTP auth challenges.
+            headers=getattr(exc, "headers", None),
         )
 
     @app.exception_handler(RequestValidationError)
