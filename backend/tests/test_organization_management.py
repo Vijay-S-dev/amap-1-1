@@ -42,6 +42,8 @@ WORKER_A_ID = UUID("c0000000-0000-0000-0000-000000000003")
 @pytest.fixture
 def mock_service() -> OrganizationManagementService:
     """Fixture providing a mock OrganizationManagementService with tenant repositories mocked."""
+    from datetime import datetime, timezone
+
     service = OrganizationManagementService(
         orgs_repo=MagicMock(),
         depts_repo=MagicMock(),
@@ -50,7 +52,41 @@ def mock_service() -> OrganizationManagementService:
         workflows_repo=MagicMock(),
         audit_repo=MagicMock(),
         assistance_repo=MagicMock(),
+        user_departments_repo=MagicMock(),
+        roles_repo=MagicMock(),
+        user_roles_repo=MagicMock(),
+        worker_readiness_repo=MagicMock(),
     )
+    # list_workers now reads the real directory query: return an empty page by
+    # default so contract-level tests stay deterministic.
+    service.workers_repo.list_enterprise_directory.return_value = ([], 0)
+    # invite_worker performs a real duplicate-email check before creating rows.
+    service.users_repo.get_by_email.return_value = None
+    now = datetime.now(timezone.utc)
+    created_user_id = uuid4()
+
+    def _fake_create_user(organization_id, email, full_name, password_hash):
+        # Echo the real inputs (matching UsersRepository.create behavior).
+        return {
+            "id": created_user_id,
+            "organization_id": organization_id,
+            "email": email,
+            "full_name": full_name,
+            "password_hash": password_hash,
+            "status": "active",
+            "created_at": now,
+            "updated_at": now,
+        }
+
+    service.users_repo.create.side_effect = _fake_create_user
+    service.workers_repo.create.return_value = {
+        "id": uuid4(),
+        "user_id": created_user_id,
+        "badge_number": None,
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
     return service
 
 

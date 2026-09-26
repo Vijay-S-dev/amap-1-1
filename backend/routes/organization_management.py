@@ -37,7 +37,7 @@ from models.enterprise_organization import (
     WorkflowTemplate,
     WorkflowUpdatePayload,
 )
-from services.base import NotFoundError, ValidationError
+from services.base import ConflictError, NotFoundError, ValidationError
 from services.organization_management_service import OrganizationManagementService
 
 router = APIRouter(prefix="/organizations/manage", tags=["Enterprise Organization Management"])
@@ -293,11 +293,16 @@ def invite_worker(
     service: OrganizationManagementService = Depends(get_org_management_service),
 ) -> EnterpriseWorkerItem:
     """Generate accessible worker invitation for AMAP onboarding."""
-    return service.invite_worker(
-        organization_id=admin_user.organization_id,
-        payload=payload,
-        actor_id=admin_user.user_id,
-    )
+    try:
+        return service.invite_worker(
+            organization_id=admin_user.organization_id,
+            payload=payload,
+            actor_id=admin_user.user_id,
+        )
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
 
 
 # =====================================================================

@@ -29,14 +29,23 @@ from models.enterprise_organization import (
     WorkflowTemplate,
     WorkflowUpdatePayload,
 )
+import secrets
+
+from psycopg import errors
+
 from repositories.assistance_requests import AssistanceRequestsRepository
 from repositories.audit_events import AuditEventsRepository
 from repositories.departments import DepartmentsRepository
 from repositories.organizations import OrganizationsRepository
+from repositories.roles import RolesRepository
+from repositories.user_departments import UserDepartmentsRepository
+from repositories.user_roles import UserRolesRepository
 from repositories.users import UsersRepository
+from repositories.worker_readiness import WorkerReadinessRepository
 from repositories.worker_profiles import WorkerProfilesRepository
 from repositories.workflows import WorkflowsRepository
-from services.base import NotFoundError, ValidationError
+from services.base import ConflictError, NotFoundError, ValidationError
+from utils.security import hash_password
 
 
 class OrganizationManagementService:
@@ -51,6 +60,10 @@ class OrganizationManagementService:
         workflows_repo: Optional[WorkflowsRepository] = None,
         audit_repo: Optional[AuditEventsRepository] = None,
         assistance_repo: Optional[AssistanceRequestsRepository] = None,
+        user_departments_repo: Optional[UserDepartmentsRepository] = None,
+        roles_repo: Optional[RolesRepository] = None,
+        user_roles_repo: Optional[UserRolesRepository] = None,
+        worker_readiness_repo: Optional[WorkerReadinessRepository] = None,
     ) -> None:
         self.orgs_repo = orgs_repo or OrganizationsRepository()
         self.depts_repo = depts_repo or DepartmentsRepository()
@@ -59,6 +72,10 @@ class OrganizationManagementService:
         self.workflows_repo = workflows_repo or WorkflowsRepository()
         self.audit_repo = audit_repo or AuditEventsRepository()
         self.assistance_repo = assistance_repo or AssistanceRequestsRepository()
+        self.user_departments_repo = user_departments_repo or UserDepartmentsRepository()
+        self.roles_repo = roles_repo or RolesRepository()
+        self.user_roles_repo = user_roles_repo or UserRolesRepository()
+        self.worker_readiness_repo = worker_readiness_repo or WorkerReadinessRepository()
 
     # =========================================================================
     # 1. Organization Dashboard KPIs (§ 5, § 34)
@@ -391,96 +408,40 @@ class OrganizationManagementService:
         status_filter: Optional[str] = None,
         dept_filter: Optional[UUID] = None,
     ) -> Dict[str, Any]:
-        """List enterprise workers with real operational and lifecycle state."""
-        now = datetime.now(timezone.utc)
+        """List workers from PostgreSQL with real lifecycle and operational state."""
+        rows, total = self.workers_repo.list_enterprise_directory(
+            organization_id=organization_id,
+            limit=page_size,
+            offset=(page - 1) * page_size,
+            status_filter=status_filter,
+            dept_filter=dept_filter,
+        )
+
         items: List[EnterpriseWorkerItem] = [
             EnterpriseWorkerItem(
-                worker_profile_id=UUID("d0000000-0000-0000-0000-000000000001"),
-                user_id=UUID("c0000000-0000-0000-0000-000000000003"),
-                organization_id=organization_id,
-                full_name="Alex Morgan",
-                email="alex.worker@amap.com",
-                badge_number="WRK-1048",
-                department_name="Powertrain & Gearbox Integration",
-                supervisor_name="Marcus Vance",
-                status="WORKING",
-                interaction_mode="multimodal",
-                training_completed=True,
-                current_task_name="Inverter Sub-Assembly Alpha",
-                created_at=now,
-            ),
-            EnterpriseWorkerItem(
-                worker_profile_id=UUID("d0000000-0000-0000-0000-000000000002"),
-                user_id=UUID("c0000000-0000-0000-0000-000000000004"),
-                organization_id=organization_id,
-                full_name="Jordan Lee",
-                email="jordan.worker@amap.com",
-                badge_number="WRK-1049",
-                department_name="Chassis & Structural Welding",
-                supervisor_name="Marcus Vance",
-                status="READY",
-                interaction_mode="gesture",
-                training_completed=True,
-                current_task_name=None,
-                created_at=now,
-            ),
-            EnterpriseWorkerItem(
-                worker_profile_id=UUID("d0000000-0000-0000-0000-000000000003"),
-                user_id=UUID("c0000000-0000-0000-0000-000000000005"),
-                organization_id=organization_id,
-                full_name="Samira Chen",
-                email="samira.chen@amap.com",
-                badge_number="WRK-1052",
-                department_name="Quality Control & Diagnostics",
-                supervisor_name="Marcus Vance",
-                status="ASSISTANCE_REQUESTED",
-                interaction_mode="voice",
-                training_completed=True,
-                current_task_name="High-Voltage Isolation Check",
-                created_at=now,
-            ),
-            EnterpriseWorkerItem(
-                worker_profile_id=UUID("d0000000-0000-0000-0000-000000000004"),
-                user_id=UUID("c0000000-0000-0000-0000-000000000006"),
-                organization_id=organization_id,
-                full_name="Kenji Sato",
-                email="kenji.sato@amap.com",
-                badge_number="WRK-1055",
-                department_name="Powertrain & Gearbox Integration",
-                supervisor_name="Marcus Vance",
-                status="WORKING",
-                interaction_mode="multimodal",
-                training_completed=True,
-                current_task_name="Planetary Gearbox Assembly",
-                created_at=now,
-            ),
-            EnterpriseWorkerItem(
-                worker_profile_id=UUID("d0000000-0000-0000-0000-000000000005"),
-                user_id=UUID("c0000000-0000-0000-0000-000000000007"),
-                organization_id=organization_id,
-                full_name="Maria Rodriguez",
-                email="maria.newhire@amap.com",
-                badge_number="WRK-1060",
-                department_name="Powertrain & Gearbox Integration",
-                supervisor_name="Marcus Vance",
-                status="ONBOARDING",
-                interaction_mode="multimodal",
-                training_completed=False,
-                current_task_name=None,
-                created_at=now,
-            ),
+                worker_profile_id=row["worker_profile_id"],
+                user_id=row["user_id"],
+                organization_id=row["organization_id"],
+                full_name=row["full_name"],
+                email=row["email"],
+                badge_number=row.get("badge_number"),
+                department_id=row.get("department_id"),
+                department_name=row.get("department_name") or "Unassigned",
+                # No worker->supervisor assignment model exists yet; "Unassigned"
+                # is the honest value (the previous hardcoded roster invented names).
+                supervisor_name="Unassigned",
+                status=row["lifecycle_status"],
+                interaction_mode=row.get("interaction_mode") or "multimodal",
+                training_completed=bool(row.get("overall_ready")),
+                current_task_name=row.get("current_task_name"),
+                created_at=row["created_at"],
+            )
+            for row in rows
         ]
 
-        if status_filter:
-            items = [w for w in items if w.status.lower() == status_filter.lower()]
-
-        total_count = len(items)
-        start = (page - 1) * page_size
-        end = start + page_size
-
         return {
-            "items": items[start:end],
-            "total_count": total_count,
+            "items": items,
+            "total_count": total,
             "page": page,
             "page_size": page_size,
         }
@@ -491,47 +452,126 @@ class OrganizationManagementService:
         payload: WorkerInvitePayload,
         actor_id: UUID,
     ) -> EnterpriseWorkerItem:
-        """Generate secure worker onboarding invitation without requiring mouse/keyboard setup."""
-        now = datetime.now(timezone.utc)
-        new_profile_id = uuid4()
-        new_user_id = uuid4()
+        """
+        Create a real worker invitation: persists the user account, worker
+        profile (badge), department assignment, worker role, and readiness
+        preferences in PostgreSQL. Duplicate emails yield ConflictError (409).
+        """
+        email = payload.email.strip().lower()
 
-        dept_name = "Unassigned"
+        existing = self.users_repo.get_by_email(organization_id, email)
+        if existing:
+            raise ConflictError(
+                f"A user with email '{email}' already exists in this organization."
+            )
+
+        dept = None
         if payload.department_id:
             dept = self.depts_repo.get_by_id(payload.department_id)
-            if dept and dept["organization_id"] == organization_id:
-                dept_name = dept["name"]
+            if not dept or dept["organization_id"] != organization_id:
+                raise ValidationError("Department does not exist in this organization.")
+
+        # Initial credential: operator-provided temporary password, otherwise a
+        # generated secret. Never returned in the API response.
+        initial_password = (payload.temporary_password or secrets.token_urlsafe(24))
+        password_hash = hash_password(initial_password)
+
+        try:
+            user = self.users_repo.create(
+                organization_id=organization_id,
+                email=email,
+                full_name=payload.full_name,
+                password_hash=password_hash,
+            )
+        except errors.UniqueViolation as exc:
+            raise ConflictError(
+                f"A user with email '{email}' already exists in this organization."
+            ) from exc
+
+        try:
+            profile = self.workers_repo.create(
+                user["id"],
+                badge_number=payload.badge_number,
+            )
+
+            if dept:
+                self.user_departments_repo.create(
+                    user_id=user["id"],
+                    department_id=dept["id"],
+                )
+
+            worker_role = self.roles_repo.get_by_name("worker")
+            if worker_role and not self.user_roles_repo.get(
+                user_id=user["id"], role_id=worker_role["id"]
+            ):
+                self.user_roles_repo.create(
+                    user_id=user["id"],
+                    role_id=worker_role["id"],
+                )
+
+            modality = payload.preferred_modality or "multimodal"
+            self.worker_readiness_repo.upsert(
+                profile["id"],
+                {
+                    "is_fresher": True,
+                    "onboarding_completed": False,
+                    "readiness_status": "incomplete",
+                    "interaction_mode": modality,
+                    "gesture_ready": False,
+                    "voice_ready": False,
+                    "multimodal_ready": False,
+                    "task_training_complete": False,
+                    "overall_ready": False,
+                    "completed_stages": [],
+                    "active_preferences": {
+                        "language": "en",
+                        "modality": modality,
+                        "dwell_time_ms": 500,
+                        "high_contrast": False,
+                        "text_scale": 1.0,
+                    },
+                },
+            )
+        except Exception:
+            # No cross-repository transaction exists at the repository layer;
+            # roll back the partially created account so a failed invitation
+            # never leaves an orphaned user row.
+            try:
+                self.users_repo.delete_by_id(user["id"])
+            except Exception:
+                pass
+            raise
 
         self.audit_repo.create(
             organization_id=organization_id,
             actor_user_id=actor_id,
             event_type="worker.invited",
             resource_type="worker_profile",
-            resource_id=new_profile_id,
+            resource_id=profile["id"],
             event_data={
-                "email": payload.email,
+                "email": email,
                 "full_name": payload.full_name,
                 "badge_number": payload.badge_number,
                 "preferred_modality": payload.preferred_modality,
-                "department": dept_name,
+                "department": dept["name"] if dept else "Unassigned",
             },
         )
 
         return EnterpriseWorkerItem(
-            worker_profile_id=new_profile_id,
-            user_id=new_user_id,
+            worker_profile_id=profile["id"],
+            user_id=user["id"],
             organization_id=organization_id,
-            full_name=payload.full_name,
-            email=payload.email,
-            badge_number=payload.badge_number or f"WRK-{new_profile_id.hex[:4].upper()}",
-            department_id=payload.department_id,
-            department_name=dept_name,
+            full_name=user["full_name"],
+            email=user["email"],
+            badge_number=profile.get("badge_number"),
+            department_id=dept["id"] if dept else None,
+            department_name=dept["name"] if dept else "Unassigned",
             supervisor_name="Unassigned",
             status="INVITED",
             interaction_mode=payload.preferred_modality or "multimodal",
             training_completed=False,
             current_task_name=None,
-            created_at=now,
+            created_at=user["created_at"],
         )
 
     # =========================================================================

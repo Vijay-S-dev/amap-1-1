@@ -141,6 +141,12 @@ class WorkerInvitePayload(StrictInputModel):
     badge_number: Optional[str] = Field(None, max_length=50)
     department_id: Optional[UUID] = None
     preferred_modality: Optional[str] = "multimodal"
+    temporary_password: Optional[str] = Field(
+        None,
+        min_length=8,
+        max_length=128,
+        description="Initial credential for the invited worker; generated if omitted. Never returned in responses.",
+    )
 
 
 class WorkerAssignmentPayload(StrictInputModel):

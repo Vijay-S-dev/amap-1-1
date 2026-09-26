@@ -104,6 +104,30 @@ class UsersRepository:
 
                 return user
 
+    def update_status(
+        self,
+        user_id: UUID,
+        status: str,
+    ) -> dict[str, Any] | None:
+        """Update a user's account status and return the updated row (or None)."""
+        with get_db_connection() as connection:
+            with connection.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(
+                    """
+                    UPDATE users
+                    SET
+                        status = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                    RETURNING id, organization_id, email, full_name, password_hash,
+                              status, created_at, updated_at
+                    """,
+                    (status, user_id),
+                )
+                updated = cursor.fetchone()
+                connection.commit()
+                return updated
+
     def delete_by_id(self, user_id: UUID) -> bool:
         """Delete a user by ID and return whether it was deleted."""
         with get_db_connection() as connection:
