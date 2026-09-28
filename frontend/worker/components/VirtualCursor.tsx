@@ -10,6 +10,8 @@
 
 import React from 'react';
 import { InteractionState } from '@/worker/lib/gestureEngine';
+import { t } from '@/shared/i18n/languages';
+import { useAccessibility } from '@/shared/theme/AccessibilityContext';
 
 interface VirtualCursorProps {
   position: { x: number; y: number } | null;
@@ -29,19 +31,20 @@ const STATE_COLORS: Record<InteractionState, string> = {
   EMERGENCY_STOPPED: '#f43f5e',
 };
 
-const STATE_LABELS: Record<InteractionState, string> = {
-  IDLE: 'IDLE',
-  HOVER: 'POINTER',
-  ARMED: 'ARMED',
-  TRIGGERED: 'ACTION',
-  HELD: 'HELD',
-  DRAGGING: 'DRAGGING',
-  RELEASED: 'RELEASED',
-  PAUSED: 'PAUSED',
-  EMERGENCY_STOPPED: 'E-STOP',
+const STATE_LABEL_KEYS: Record<InteractionState, string> = {
+  IDLE: 'cursor_state_idle',
+  HOVER: 'cursor_state_hover',
+  ARMED: 'cursor_state_armed',
+  TRIGGERED: 'cursor_state_triggered',
+  HELD: 'cursor_state_held',
+  DRAGGING: 'cursor_state_dragging',
+  RELEASED: 'cursor_state_released',
+  PAUSED: 'cursor_state_paused',
+  EMERGENCY_STOPPED: 'cursor_state_estopped',
 };
 
 export function VirtualCursor({ position, state, visible }: VirtualCursorProps) {
+  const { language } = useAccessibility();
   if (!visible || !position) return null;
 
   const color = STATE_COLORS[state] || STATE_COLORS.HOVER;
@@ -107,7 +110,7 @@ export function VirtualCursor({ position, state, visible }: VirtualCursorProps) 
           whiteSpace: 'nowrap',
         }}
       >
-        {STATE_LABELS[state] || state}
+        {t(STATE_LABEL_KEYS[state] || 'cursor_state_idle', language)}
       </span>
     </div>
   );

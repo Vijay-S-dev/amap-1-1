@@ -1,6 +1,6 @@
 # AMAP — Real-Time Gesture / Voice / Multimodal Task Execution: Final Report
 
-**Branch:** `arena/01a0e82b-amap` · **Commit:** `c818836` · **Working tree:** clean (all work committed & pushed)
+**Branch:** `arena/01a0e82b-amap` · **Working tree:** clean (all work committed & pushed; see git log for SHAs)
 
 ---
 
@@ -176,6 +176,27 @@ MediaPipe assets remaining in place (`frontend/public/mediapipe/wasm/*`,
 - Supervisor views are org-filtered as before; the fix added **real telemetry**, not removed filters
 - All task actions pass the `/actions/execute` safety gateway (Recognition ≠ Intent ≠ Authorization ≠ Execution)
 - Emergency stop writes an immutable event + urgent assistance request (supervisor-visible)
+
+---
+
+## 7b. Post-report verification wave (live stack, i18n, lint, runner)
+
+| Item | Result |
+|---|---|
+| `next lint` | **No ESLint warnings or errors** |
+| Live stack (backend uvicorn :8000 + Next dev :3000) | All pages **200**: `/`, `/login`, `/worker`, `/organization`, `/admin`, `/onboarding` |
+| Same-origin API proxy (`next.config.js` rewrite, `BACKEND_ORIGIN` env, default `http://127.0.0.1:8000`) | Browser preview calls relative `/api/v1/*` → proxied to the backend (no CORS, no localhost-from-browser); no-op when an absolute `NEXT_PUBLIC_API_BASE_URL` is set (Docker) |
+| Full-stack login through the proxy | Fresher (maria.newhire) + worker + supervisor JWTs issued via `:3000/api/v1/auth/login` |
+| Supervisor live view through the stack | 3 workers, org-filtered, real statuses (Alex ASSISTANCE_REQUESTED from the seeded open ticket, Maria COMPLETED, Jordan OFFLINE), real last actions |
+| MediaPipe assets | `vision_wasm_internal.wasm` + `hand_landmarker.task` → **200** |
+| i18n (English/Hindi) | Not regressed (base page used 1 `t()` call; i18n-heavy components untouched) **and extended**: ~45 new dictionary keys in both languages (`workstation_*`, `control_panel_*`, `banner_*`, `cursor_state_*`), new `tParams()` placeholder helper; wired into WorkflowStepViewer, VirtualCursor, GestureControlPanel, and the paused/e-stop banners |
+| Unified runner | `scripts/run_all_tests.py` now includes the realtime-engine pytest suite, the frontend engine unit tests (`node`), and the E2E worker journey |
+
+Note on the live preview: running `next build` while `next dev` is serving corrupts
+the shared `.next` webpack cache (symptom: `__webpack_modules__[moduleId] is not
+a function`, `/login` 500). This is a dev-cache artifact, not a code error —
+verified by clean `tsc`, clean production build, and a fresh dev server serving
+all pages 200.
 
 ---
 

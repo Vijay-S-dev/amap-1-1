@@ -8,6 +8,8 @@
 
 import React from 'react';
 import { WorkflowStep } from '@/shared/types';
+import { t, tParams } from '@/shared/i18n/languages';
+import { useAccessibility } from '@/shared/theme/AccessibilityContext';
 
 interface WorkflowStepViewerProps {
   currentStep: WorkflowStep;
@@ -34,6 +36,7 @@ export function WorkflowStepViewer({
   onEmergencyStop,
   children,
 }: WorkflowStepViewerProps) {
+  const { language } = useAccessibility();
   const isCurrentStepCompleted = completedStepIds.has(currentStep.id);
 
   return (
@@ -42,10 +45,10 @@ export function WorkflowStepViewer({
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
         <div>
           <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--worker-cyan)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-            Assembly Workflow
+            {t('current_task', language)}
           </span>
           <h1 style={{ fontSize: '1.75rem', fontWeight: 800, marginTop: '0.25rem' }}>
-            Step {currentStep.stepNumber} of {totalSteps}: {currentStep.title}
+            {tParams('workstation_step_of', language, { n: currentStep.stepNumber, total: totalSteps })}: {currentStep.title}
             {isCurrentStepCompleted && (
               <span className="badge badge-emerald" style={{ marginLeft: '0.75rem', fontSize: '0.8rem', padding: '0.3rem 0.7rem' }}>
                 ✓ Completed
@@ -55,7 +58,7 @@ export function WorkflowStepViewer({
         </div>
         <div style={{ textAlign: 'right' }}>
           <span className="badge badge-cyan" style={{ fontSize: '0.85rem', padding: '0.35rem 0.85rem' }}>
-            Target: {currentStep.spatialTargetId || 'Standard Workzone'}
+            {tParams('workstation_target', language, { target: currentStep.spatialTargetId || t('workstation_standard_workzone', language) })}
           </span>
         </div>
       </div>
@@ -113,7 +116,7 @@ export function WorkflowStepViewer({
           </div>
           <div>
             <h2 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '0.5rem', color: 'white' }}>
-              Instruction Guidance
+              {t('workstation_instruction_guidance', language)}
             </h2>
             <p style={{ fontSize: '1.1rem', lineHeight: '1.6', color: 'var(--text-primary)' }}>
               {currentStep.instructionText}
@@ -138,7 +141,7 @@ export function WorkflowStepViewer({
           >
             <span>🎯</span>
             <span>
-              Spatial Focus Area: <strong>{currentStep.spatialTargetId}</strong> — Align parts within optical target boundary.
+              {t('workstation_spatial_focus', language)}: <strong>{currentStep.spatialTargetId}</strong>
             </span>
           </div>
         )}
@@ -180,7 +183,7 @@ export function WorkflowStepViewer({
             className="btn btn-secondary"
             style={{ minHeight: '48px', opacity: currentStepIndex === 0 ? 0.5 : 1 }}
           >
-            ← Previous Step
+            ← {t('workstation_prev_step', language)}
           </button>
           {onCompleteStep && (
             <button
@@ -191,7 +194,7 @@ export function WorkflowStepViewer({
               style={{ minHeight: '48px', opacity: isCurrentStepCompleted ? 0.5 : 1, borderColor: 'rgba(16, 185, 129, 0.5)', color: 'var(--org-emerald)' }}
               data-amap-action-id="complete-step"
             >
-              ✓ Complete Step
+              ✓ {t('workstation_complete_step', language)}
             </button>
           )}
           <button
@@ -201,7 +204,7 @@ export function WorkflowStepViewer({
             style={{ minHeight: '48px', fontWeight: 700 }}
             data-amap-action-id="next-step"
           >
-            Confirm &amp; Next Step →
+            {t('workstation_confirm_next', language)} →
           </button>
         </div>
 
@@ -213,7 +216,7 @@ export function WorkflowStepViewer({
             style={{ minHeight: '48px', borderColor: 'rgba(245, 158, 11, 0.4)', color: 'var(--accent-amber)' }}
             data-amap-action-id="request-assistance"
           >
-            🙋 Request Assistance
+            🙋 {t('workstation_request_assistance', language)}
           </button>
           <button
             type="button"
@@ -222,7 +225,7 @@ export function WorkflowStepViewer({
             style={{ minHeight: '48px', minWidth: '160px', fontWeight: 800 }}
             data-amap-action-id="emergency-stop"
           >
-            🛑 Emergency Stop
+            🛑 {t('emergency_stop_btn', language)}
           </button>
         </div>
       </div>

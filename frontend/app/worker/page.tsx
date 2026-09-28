@@ -1265,9 +1265,9 @@ export default function WorkerPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
             <span style={{ fontSize: '1.6rem' }}>⏸️</span>
             <div>
-              <strong style={{ display: 'block' }}>Interaction Paused</strong>
+              <strong style={{ display: 'block' }}>⏸️ {t('cursor_state_paused', language).toUpperCase()}</strong>
               <span style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                Task actions suspended. Pointer and UI navigation stay live. Say &quot;resume&quot; to continue.
+                {t('banner_paused', language)}
               </span>
             </div>
           </div>
@@ -1277,7 +1277,7 @@ export default function WorkerPage() {
             className="btn btn-primary"
             style={{ minHeight: '48px', background: 'var(--org-emerald)', borderColor: 'var(--org-emerald)' }}
           >
-            ▶️ Resume
+            ▶️ {t('banner_resume', language)}
           </button>
         </div>
       )}

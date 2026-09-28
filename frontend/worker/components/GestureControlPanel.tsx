@@ -11,6 +11,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { api } from '@/shared/api/client';
+import { t } from '@/shared/i18n/languages';
+import { useAccessibility } from '@/shared/theme/AccessibilityContext';
 
 interface GestureControlPanelProps {
   /** Effective mapping loaded by the workstation (worker -> preset -> default). */
@@ -39,6 +41,7 @@ export function GestureControlPanel({
   enabledGesturesList,
   actionChoices,
 }: GestureControlPanelProps) {
+  const { language } = useAccessibility();
   const [isOpen, setIsOpen] = useState(false);
   const [draftMap, setDraftMap] = useState<Record<string, string>>(gestureActionMap);
   const [draftCalibration, setDraftCalibration] = useState<Record<string, any>>(calibration);
@@ -78,9 +81,9 @@ export function GestureControlPanel({
   const sourceBadge = (gesture: string) => {
     const src = sources[gesture] || 'default';
     const labels: Record<string, string> = {
-      worker_override: 'YOUR SETTING',
-      preset: 'ORG PRESET',
-      default: 'DEFAULT',
+      worker_override: t('control_panel_your_setting', language),
+      preset: t('control_panel_org_preset', language),
+      default: t('control_panel_default', language),
     };
     const colors: Record<string, string> = {
       worker_override: 'var(--org-emerald)',
@@ -252,11 +255,11 @@ export function GestureControlPanel({
               disabled={isSaving}
               aria-busy={isSaving}
             >
-              💾 {isSaving ? 'Saving…' : 'Save Gesture Settings'}
+              💾 {isSaving ? t('control_panel_saving', language) : t('control_panel_save', language)}
             </button>
             {saveOk && (
               <span role="status" style={{ color: 'var(--org-emerald)', fontWeight: 700, fontSize: '0.85rem' }}>
-                ✓ Saved to your worker profile (PostgreSQL).
+                ✓ {t('control_panel_saved', language)}
               </span>
             )}
             {saveError && (

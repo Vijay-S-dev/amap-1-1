@@ -103,6 +103,46 @@ export const DICTIONARY: Record<SupportedLanguage, Record<string, string>> = {
     listening_label: 'Listening',
     camera_sr_ready: 'Camera ready for gesture input.',
     mic_sr_ready: 'Microphone ready for voice input.',
+    // Real-time interaction workstation strings
+    workstation_step_of: 'Step {n} of {total}',
+    workstation_target: 'Target: {target}',
+    workstation_standard_workzone: 'Standard Workzone',
+    workstation_instruction_guidance: 'Instruction Guidance',
+    workstation_spatial_focus: 'Spatial Focus Area',
+    workstation_completed: 'Completed',
+    workstation_input_hint: 'Point to move the pointer. Pinch to click. Two fingers for right-click and scroll. Swipe right for next step, or say "Next" / "Confirm".',
+    workstation_confirm_next: 'Confirm & Next Step',
+    workstation_prev_step: 'Previous Step',
+    workstation_complete_step: 'Complete Step',
+    workstation_request_assistance: 'Request Assistance',
+    workstation_end_work: 'End Work Session',
+    workstation_end_work_summary: 'Work Session Summary',
+    control_panel_title: 'Gesture Control Panel',
+    control_panel_save: 'Save to My Profile',
+    control_panel_saving: 'Saving…',
+    control_panel_saved: 'Saved to your worker profile (PostgreSQL).',
+    control_panel_source: 'Source',
+    control_panel_enabled: 'Enabled',
+    control_panel_action: 'Action',
+    control_panel_calibration: 'Calibration',
+    control_panel_your_setting: 'Your setting',
+    control_panel_org_preset: 'Org preset',
+    control_panel_default: 'Default',
+    banner_paused: 'Session paused — pointer and clicks stay active; task gestures are locked. Resume to continue.',
+    banner_resume: 'Resume Session',
+    banner_emergency_stopped: 'EMERGENCY STOP ACTIVE — all gesture and task actions are locked. A supervisor has been notified.',
+    banner_pending_confirmation: 'Action awaiting confirmation',
+    banner_confirm: 'Confirm',
+    banner_cancel: 'Cancel',
+    cursor_state_idle: 'Idle',
+    cursor_state_hover: 'Hover',
+    cursor_state_armed: 'Armed',
+    cursor_state_triggered: 'Triggered',
+    cursor_state_held: 'Held',
+    cursor_state_dragging: 'Dragging',
+    cursor_state_released: 'Released',
+    cursor_state_paused: 'Paused',
+    cursor_state_estopped: 'EMERGENCY STOP',
   },
   hi: {
     app_title: 'एक्सेसिबल मल्टीमॉडल असेंबली प्लेटफॉर्म (AMAP)',
@@ -187,9 +227,65 @@ export const DICTIONARY: Record<SupportedLanguage, Record<string, string>> = {
     listening_label: 'सुनना',
     camera_sr_ready: 'संकेत इनपुट के लिए कैमरा तैयार है।',
     mic_sr_ready: 'आवाज इनपुट के लिए माइक्रोफ़ोन तैयार है।',
+    // Real-time interaction workstation strings (Hindi)
+    workstation_step_of: 'चरण {n} / {total}',
+    workstation_target: 'लक्ष्य: {target}',
+    workstation_standard_workzone: 'मानक कार्यक्षेत्र',
+    workstation_instruction_guidance: 'निर्देश मार्गदर्शन',
+    workstation_spatial_focus: 'स्थानिक फोकस क्षेत्र',
+    workstation_completed: 'पूर्ण',
+    workstation_input_hint: 'संकेतक चलाने के लिए इशारा करें। क्लिक के लिए चुटकी लें। राइट-क्लिक और स्क्रॉल के लिए दो उंगलियाँ। अगले चरण के लिए दाईं ओर स्वाइप करें, या "आगे" / "पुष्टि" कहें।',
+    workstation_confirm_next: 'पुष्टि करें और अगला चरण',
+    workstation_prev_step: 'पिछला चरण',
+    workstation_complete_step: 'चरण पूर्ण करें',
+    workstation_request_assistance: 'सहायता मांगें',
+    workstation_end_work: 'कार्य सत्र समाप्त करें',
+    workstation_end_work_summary: 'कार्य सत्र सारांश',
+    control_panel_title: 'संकेत नियंत्रण पैनल',
+    control_panel_save: 'मेरी प्रोफ़ाइल में सहेजें',
+    control_panel_saving: 'सहेजा जा रहा है…',
+    control_panel_saved: 'आपकी वर्कर प्रोफ़ाइल में सहेजा गया (PostgreSQL)।',
+    control_panel_source: 'स्रोत',
+    control_panel_enabled: 'सक्रिय',
+    control_panel_action: 'क्रिया',
+    control_panel_calibration: 'कैलिब्रेशन',
+    control_panel_your_setting: 'आपकी सेटिंग',
+    control_panel_org_preset: 'संगठन प्रीसेट',
+    control_panel_default: 'डिफ़ॉल्ट',
+    banner_paused: 'सत्र रुका हुआ है — संकेतक और क्लिक सक्रिय रहेंगे; कार्य संकेत लॉक हैं। जारी रखने के लिए पुनः आरंभ करें।',
+    banner_resume: 'सत्र पुनः आरंभ करें',
+    banner_emergency_stopped: 'आपातकालीन रोक सक्रिय — सभी संकेत और कार्य क्रियाएँ लॉक हैं। पर्यवेक्षक को सूचित कर दिया गया है।',
+    banner_pending_confirmation: 'पुष्टि की प्रतीक्षा में क्रिया',
+    banner_confirm: 'पुष्टि करें',
+    banner_cancel: 'रद्द करें',
+    cursor_state_idle: 'निष्क्रिय',
+    cursor_state_hover: 'होवर',
+    cursor_state_armed: 'तैयार',
+    cursor_state_triggered: 'ट्रिगर्ड',
+    cursor_state_held: 'दबाए रखा',
+    cursor_state_dragging: 'खींच रहे हैं',
+    cursor_state_released: 'मुक्त',
+    cursor_state_paused: 'रुका हुआ',
+    cursor_state_estopped: 'आपातकालीन रोक',
   },
 };
 
 export function t(key: string, lang: SupportedLanguage = 'en'): string {
   return DICTIONARY[lang]?.[key] || DICTIONARY['en'][key] || key;
+}
+
+/**
+ * Translate a key and substitute {placeholder} parameters, e.g.
+ * tParams('workstation_step_of', 'hi', { n: 2, total: 5 }).
+ */
+export function tParams(
+  key: string,
+  lang: SupportedLanguage = 'en',
+  params: Record<string, string | number> = {}
+): string {
+  let text = t(key, lang);
+  for (const [name, value] of Object.entries(params)) {
+    text = text.split(`{${name}}`).join(String(value));
+  }
+  return text;
 }
