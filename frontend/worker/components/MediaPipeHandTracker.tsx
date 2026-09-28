@@ -15,6 +15,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import { useAccessibility } from '@/shared/theme/AccessibilityContext';
 import { classifyHandPose } from '@/worker/lib/handPoses';
+import { computeContainTransform } from '@/worker/lib/cameraTransform';
 import { t } from '@/shared/i18n/languages';
 
 // MediaPipe 21 3D Joint Connection Topology
@@ -177,6 +178,8 @@ export interface HandTrackerProps {
  */
 export const DEFAULT_DWELL_GESTURES = ['THUMBS_UP', 'THUMBS_DOWN', 'OPEN_PALM', 'FIST'];
 
+
+
 export function MediaPipeHandTracker({
   onGestureDetected,
   onLandmarksDetected,
@@ -272,14 +275,27 @@ export function MediaPipeHandTracker({
 
     if (!allHandsLandmarks || allHandsLandmarks.length === 0) return;
 
+    // The <video> is object-fit: CONTAIN (never cropped). Map landmark
+    // coordinates through the same letterbox transform so the skeleton
+    // overlay aligns exactly with the visible hand at any container size.
+    const videoEl = videoRef.current;
+    const { scale, offsetX, offsetY } = computeContainTransform(
+      videoEl?.videoWidth || 640,
+      videoEl?.videoHeight || 480,
+      canvasWidth,
+      canvasHeight
+    );
+    const toCanvasX = (nx: number) => offsetX + (1 - nx) * (videoEl?.videoWidth || 640) * scale; // mirrored
+    const toCanvasY = (ny: number) => offsetY + ny * (videoEl?.videoHeight || 480) * scale;
+
     allHandsLandmarks.forEach((landmarks, handIdx) => {
       if (!landmarks || landmarks.length < 21) return;
 
       // Compute bounding box around joints
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       landmarks.forEach((pt) => {
-        const px = (1 - pt.x) * canvasWidth; // Mirrored
-        const py = pt.y * canvasHeight;
+        const px = toCanvasX(pt.x);
+        const py = toCanvasY(pt.y);
         if (px < minX) minX = px;
         if (py < minY) minY = py;
         if (px > maxX) maxX = px;
@@ -321,10 +337,10 @@ export function MediaPipeHandTracker({
         const p2 = landmarks[endIdx];
         if (!p1 || !p2) return;
 
-        const x1 = (1 - p1.x) * canvasWidth;
-        const y1 = p1.y * canvasHeight;
-        const x2 = (1 - p2.x) * canvasWidth;
-        const y2 = p2.y * canvasHeight;
+        const x1 = toCanvasX(p1.x);
+        const y1 = toCanvasY(p1.y);
+        const x2 = toCanvasX(p2.x);
+        const y2 = toCanvasY(p2.y);
 
         ctx.beginPath();
         ctx.moveTo(x1, y1);
@@ -352,8 +368,8 @@ export function MediaPipeHandTracker({
 
       // 3. Draw 21 Joint Nodes
       landmarks.forEach((pt, idx) => {
-        const px = (1 - pt.x) * canvasWidth;
-        const py = pt.y * canvasHeight;
+        const px = toCanvasX(pt.x);
+        const py = toCanvasY(pt.y);
 
         ctx.beginPath();
         ctx.arc(px, py, idx === 4 || idx === 8 || idx === 12 || idx === 16 || idx === 20 ? 6 : 4, 0, 2 * Math.PI);
@@ -430,8 +446,11 @@ export function MediaPipeHandTracker({
           try {
             cameraStream = await navigator.mediaDevices.getUserMedia({
               video: {
-                width: { ideal: 640 },
-                height: { ideal: 480 },
+                // Prefer a high-resolution 4:3 mode: more landmark detail for
+                // distant/small hands; the browser negotiates down (640x480)
+                // when the camera does not support it.
+                width: { ideal: 1280 },
+                height: { ideal: 960 },
                 facingMode: 'user',
               },
               audio: false,
@@ -512,6 +531,17 @@ export function MediaPipeHandTracker({
         const canvas = canvasRef.current;
 
         if (video && canvas && handLandmarkerInstance && video.readyState >= 2) {
+          // Keep the canvas backing store matched to the DISPLAYED size so the
+          // skeleton overlay is pixel-exact on the enlarged camera area (a
+          // fixed 640x480 buffer would be CSS-stretched and distorted).
+          if (
+            canvas.clientWidth > 0 &&
+            canvas.clientHeight > 0 &&
+            (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight)
+          ) {
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+          }
           const ctx = canvas.getContext('2d');
           if (ctx) {
             let results: any = null;
@@ -521,8 +551,36 @@ export function MediaPipeHandTracker({
               results = null;
             }
 
-            const multiHands: Landmark3D[][] = results?.landmarks || [];
-            const multiHandLabels: string[] = results?.handednesses?.map((h: any) => h[0]?.categoryName) || [];
+            const rawHands: Landmark3D[][] = results?.landmarks || [];
+            const rawLabels: string[] = results?.handednesses?.map((h: any) => h[0]?.categoryName) || [];
+
+            // =========================================================================
+            // HAND QUALITY GATE: drop partial / too-distant / low-visibility hands
+            // BEFORE any classification, so poorly visible frames can never
+            // produce gestures or drive the interaction engine.
+            //   - palm size (wrist -> middle MCP) must exceed a minimum: a tiny
+            //     distant hand yields noisy landmarks and accidental gestures.
+            //   - when MediaPipe reports per-landmark visibility, the average
+            //     must clear a floor (occluded/partial hands are rejected).
+            // =========================================================================
+            const MIN_PALM_SIZE = 0.045; // normalized units (~4.5% of frame width)
+            const MIN_AVG_VISIBILITY = 0.55;
+            const multiHands: Landmark3D[][] = [];
+            const multiHandLabels: string[] = [];
+            rawHands.forEach((hand, handIdx) => {
+              if (!hand || hand.length < 21) return;
+              const palmSize = Math.hypot(hand[0].x - hand[9].x, hand[0].y - hand[9].y);
+              if (palmSize < MIN_PALM_SIZE) return;
+              const visibilities = hand
+                .map((pt: any) => (typeof pt?.visibility === 'number' ? pt.visibility : null))
+                .filter((v: number | null): v is number => v !== null);
+              if (visibilities.length === hand.length) {
+                const avgVisibility = visibilities.reduce((a, b) => a + b, 0) / visibilities.length;
+                if (avgVisibility < MIN_AVG_VISIBILITY) return;
+              }
+              multiHands.push(hand);
+              multiHandLabels.push(rawLabels[handIdx] || 'Right');
+            });
 
             // =========================================================================
             // STRICT LAYER 1: "IS THERE A HAND?" (NO HAND = 0 GESTURE, NO INTENT)
@@ -840,9 +898,12 @@ export function MediaPipeHandTracker({
           position: 'absolute',
           width: '100%',
           height: '100%',
-          objectFit: 'cover',
+          objectFit: 'contain', // Letterboxed: the whole camera frame (and
+          // hand) stays visible at any container size; the skeleton overlay
+          // uses the same contain transform so it aligns exactly.
           transform: 'scaleX(-1)', // Mirror user reflection
           opacity: 0.88,
+          background: '#05070d',
         }}
       />
 

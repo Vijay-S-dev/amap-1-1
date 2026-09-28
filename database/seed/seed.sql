@@ -97,6 +97,20 @@ VALUES
     ('80000000-0000-0000-0000-000000000002', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'Motor Diversity Enhanced Dwell Preset', 'Configuration with extended dwell times for motor accessibility', 'active')
 ON CONFLICT (id) DO NOTHING;
 
+-- 11a. Canonical Actions (MUST precede 11b: the gesture mappings reference
+-- these action rows by id; on a fresh database they do not exist yet,
+-- which aborted the whole seed and left zero users -> broken logins.)
+INSERT INTO actions (id, name, display_name, description, category, status)
+VALUES
+    ('40000000-0000-0000-0000-000000000001', 'next_step', 'Next Step', 'Advance to the next workflow step', 'workflow', 'active'),
+    ('40000000-0000-0000-0000-000000000002', 'confirm_action', 'Confirm Step Action', 'Confirm and complete current step action', 'workflow', 'active'),
+    ('40000000-0000-0000-0000-000000000003', 'previous_step', 'Previous Step', 'Navigate back to the previous workflow step', 'navigation', 'active'),
+    ('40000000-0000-0000-0000-000000000004', 'pause_session', 'Pause Work Session', 'Temporarily pause active workstation assembly', 'system', 'active'),
+    ('40000000-0000-0000-0000-000000000005', 'resume_session', 'Resume Work Session', 'Resume paused workstation assembly', 'system', 'active'),
+    ('40000000-0000-0000-0000-000000000006', 'emergency_stop', 'Emergency Stop', 'Software safety stop interlock and supervisor dispatch', 'system', 'active'),
+    ('40000000-0000-0000-0000-000000000007', 'request_assistance', 'Request Assistance', 'Request floor supervisor assistance ticket', 'assistance', 'active')
+ON CONFLICT (name) DO NOTHING;
+
 -- 11b. Default gesture -> action mappings for the seeded interaction presets
 -- (migration 052 seeds these too, but on a fresh database it runs before the
 -- presets exist, so the seed guarantees them once presets are created).
@@ -160,18 +174,6 @@ INSERT INTO assistance_requests (id, organization_id, worker_profile_id, status,
 VALUES
     ('70000000-0000-0000-0000-000000000001', '9a61e05d-7a32-4112-9c17-1833d7b42f65', 'd0000000-0000-0000-0000-000000000001', 'open', 'high', 'Dielectric probe calibration error on step 3.')
 ON CONFLICT (id) DO NOTHING;
-
--- 13. Canonical Actions
-INSERT INTO actions (id, name, display_name, description, category, status)
-VALUES
-    ('40000000-0000-0000-0000-000000000001', 'next_step', 'Next Step', 'Advance to the next workflow step', 'workflow', 'active'),
-    ('40000000-0000-0000-0000-000000000002', 'confirm_action', 'Confirm Step Action', 'Confirm and complete current step action', 'workflow', 'active'),
-    ('40000000-0000-0000-0000-000000000003', 'previous_step', 'Previous Step', 'Navigate back to the previous workflow step', 'navigation', 'active'),
-    ('40000000-0000-0000-0000-000000000004', 'pause_session', 'Pause Work Session', 'Temporarily pause active workstation assembly', 'system', 'active'),
-    ('40000000-0000-0000-0000-000000000005', 'resume_session', 'Resume Work Session', 'Resume paused workstation assembly', 'system', 'active'),
-    ('40000000-0000-0000-0000-000000000006', 'emergency_stop', 'Emergency Stop', 'Software safety stop interlock and supervisor dispatch', 'system', 'active'),
-    ('40000000-0000-0000-0000-000000000007', 'request_assistance', 'Request Assistance', 'Request floor supervisor assistance ticket', 'assistance', 'active')
-ON CONFLICT (name) DO NOTHING;
 
 -- 14. Assembly Task & Workflow Link
 INSERT INTO tasks (id, organization_id, name, description, status)

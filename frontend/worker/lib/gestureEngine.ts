@@ -73,6 +73,14 @@ export interface EngineCalibration {
   handedness: 'Left' | 'Right' | 'Either';
   /** Per-gesture enable switches. */
   enabledGestures: Record<string, boolean>;
+  /** Consecutive frames a NEW pose must persist before it is committed
+   *  (temporal stability; FIST commits immediately for safety). */
+  poseStabilityFrames: number;
+  /** Minimum palm size (normalized) for a hand to drive interaction —
+   *  smaller/distant hands are ignored (noisy landmarks, accidental gestures). */
+  minHandSize: number;
+  /** Minimum swipe velocity in normalized units/second (flicks must be fast). */
+  swipeMinVelocity: number;
 }
 
 export const DEFAULT_ENGINE_CALIBRATION: EngineCalibration = {
@@ -102,6 +110,9 @@ export const DEFAULT_ENGINE_CALIBRATION: EngineCalibration = {
     open_palm: true,
     fist: true,
   },
+  poseStabilityFrames: 3,
+  minHandSize: 0.045,
+  swipeMinVelocity: 0.55,
 };
 
 /**
@@ -222,6 +233,14 @@ export class WorkerGestureEngine {
 
   private state: InteractionState = 'IDLE';
   private pose: HandPose = 'NONE';
+
+  /** Temporal pose stability: a new raw pose must persist for
+   *  poseStabilityFrames consecutive frames before it is committed. FIST
+   *  commits on the first frame (emergency stop latency must stay minimal). */
+  private pendingPose: HandPose | null = null;
+  private pendingPoseCount = 0;
+  /** Pose committed on the PREVIOUS frame (for transition-edge detection). */
+  private lastCommittedPose: HandPose = 'NONE';
 
   /** Smoothed pointer position in normalized user-frame coordinates [0..1]. */
   private pointerNorm: { x: number; y: number } | null = null;
@@ -406,9 +425,52 @@ export class WorkerGestureEngine {
     }
 
     const events: EngineEvent[] = [];
-    const result = classifyHandPose(hand);
-    const prevPose = this.pose;
-    this.pose = result.pose;
+
+    // --- 0. Hand quality gate: too-small/distant hands are unreliable.
+    // Palm size is measured directly (wrist -> middle MCP) so the gate works
+    // even when the classifier itself rejects the skeleton (palmSize=0).
+    const palmSize = Math.hypot(hand[9].x - hand[0].x, hand[9].y - hand[0].y);
+    const rawResult = classifyHandPose(hand, { pinchActive: this.pose === 'PINCH' });
+    if (palmSize > 0 && palmSize < this.calibration.minHandSize) {
+      // Hand present but too far away: freeze interaction (no pointer, no
+      // actions) instead of acting on noisy landmarks.
+      this.palmHistory = [];
+      this.pendingPose = null;
+      this.pendingPoseCount = 0;
+      this.setState(this.hasPointer ? 'HOVER' : 'IDLE');
+      events.push({ type: 'state', state: this.state, pose: 'NONE' });
+      return events;
+    }
+
+    // --- 0b. Temporal pose stability: commit a new pose only after it has
+    // persisted for the configured number of frames (prevents landmark
+    // flutter near thresholds from producing accidental clicks). FIST
+    // (emergency stop) commits immediately.
+    const requiredFrames =
+      rawResult.pose === 'FIST' ? 1 : Math.max(1, this.calibration.poseStabilityFrames);
+    if (rawResult.pose === this.pose) {
+      this.pendingPose = null;
+      this.pendingPoseCount = 0;
+    } else if (rawResult.pose === this.pendingPose) {
+      this.pendingPoseCount += 1;
+      if (this.pendingPoseCount >= requiredFrames) {
+        this.pose = rawResult.pose;
+        this.pendingPose = null;
+        this.pendingPoseCount = 0;
+      }
+    } else {
+      this.pendingPose = rawResult.pose;
+      this.pendingPoseCount = 1;
+      if (this.pendingPoseCount >= requiredFrames) {
+        this.pose = rawResult.pose;
+        this.pendingPose = null;
+        this.pendingPoseCount = 0;
+      }
+    }
+
+    const result = rawResult.pose === this.pose ? rawResult : { ...rawResult, pose: this.pose };
+    const prevPose = this.lastCommittedPose;
+    this.lastCommittedPose = this.pose;
 
     // --- 1. FIST: immediate emergency stop (bypasses pause & debounce) ---
     if (result.pose === 'FIST') {
@@ -835,10 +897,17 @@ export class WorkerGestureEngine {
     // Mirror x so swipes match the user's frame of reference
     const dx = (1 - newest.x) - (1 - oldest.x);
     const dy = newest.y - oldest.y;
-    const thresholdX = 0.12;
-    const thresholdY = 0.1;
+    const thresholdX = 0.16;
+    const thresholdY = 0.13;
     const swipe = detectSwipe({ dx, dy }, thresholdX, thresholdY);
     if (!swipe) return null;
+    // Velocity gate: a deliberate flick is FAST. Slow drift across the frame
+    // (natural hand movement while aiming the pointer) must not fire swipes.
+    const velocity = Math.hypot(dx, dy) / (dtMs / 1000);
+    if (velocity < this.calibration.swipeMinVelocity) {
+      this.palmHistory = [];
+      return null;
+    }
     if (!this.gestureEnabled(swipe)) return null;
 
     // Cooldown: one swipe per gesture, re-arm after brief pause
@@ -893,6 +962,9 @@ export class WorkerGestureEngine {
     this.hasPointer = false;
     this.pointerNorm = null;
     this.pose = 'NONE';
+    this.lastCommittedPose = 'NONE';
+    this.pendingPose = null;
+    this.pendingPoseCount = 0;
     if (this.emergencyStopped) {
       this.setState('EMERGENCY_STOPPED');
     } else if (this.paused) {
@@ -905,6 +977,8 @@ export class WorkerGestureEngine {
   }
 
   private resetTransientTracking(): void {
+    this.pendingPose = null;
+    this.pendingPoseCount = 0;
     this.pinchStartTs = 0;
     this.pinchStartPos = null;
     this.lastDragPointer = null;

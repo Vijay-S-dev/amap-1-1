@@ -589,18 +589,19 @@ export function MultimodalHUD({
         </div>
       )}
 
-      {/* Main HUD Grid */}
+      {/* PRIMARY INTERACTION REGION: large live camera / gesture area.
+          Responsive height (clamp) — big enough to comfortably position the
+          hand, capped on small screens, and never wider than the page (no
+          horizontal scrolling). */}
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-          gap: '1rem',
+          width: '100%',
+          maxWidth: '1040px',
+          margin: '0 auto',
         }}
       >
-        {/* Real MediaPipe Hand Tracker with enabled hardware isolation */}
-        <div>
-          <MediaPipeHandTracker
-            height="240px"
+        <MediaPipeHandTracker
+          height="clamp(360px, 58vh, 720px)"
             showLabels={false}
             requiredDwellMs={dwellTimeMs}
             enabled={isGestureActive}
@@ -621,9 +622,17 @@ export function MultimodalHUD({
             }}
             onGestureConfirmed={handleGestureConfirmed}
           />
-        </div>
+      </div>
 
-        {/* Live Input Channels & Telemetry Status Cards (Section 11: Text + Icons) */}
+      {/* Secondary: Input Channels & Telemetry Status Cards (Section 11) */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+          gap: '1rem',
+          marginTop: '1rem',
+        }}
+      >
         <div
           className="glass-card"
           style={{

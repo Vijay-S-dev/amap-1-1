@@ -56,11 +56,23 @@ const dist3d = (p1: Landmark3D, p2: Landmark3D): number => {
   return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2 + dz * dz);
 };
 
+/** Pinch distance thresholds (normalized by palm size), with hysteresis:
+ *  a pose ENTERS pinch below PINCH_ENTER_THRESHOLD and only EXITS above
+ *  PINCH_EXIT_THRESHOLD, so a hand hovering near the boundary cannot
+ *  flicker PINCH <-> NONE (which the engine would read as repeated clicks). */
+export const PINCH_ENTER_THRESHOLD = 0.45;
+export const PINCH_EXIT_THRESHOLD = 0.56;
+
+export interface ClassifyOptions {
+  /** True when the previous committed pose was PINCH (enables exit hysteresis). */
+  pinchActive?: boolean;
+}
+
 /**
  * Classify a single 21-landmark hand into a canonical AMAP pose.
  * Returns pose NONE with confidence 0 when the hand skeleton is invalid.
  */
-export function classifyHandPose(landmarks: Landmark3D[]): HandPoseResult {
+export function classifyHandPose(landmarks: Landmark3D[], options?: ClassifyOptions): HandPoseResult {
   const none = (pinch = 1): HandPoseResult => ({
     pose: 'NONE',
     confidence: 0,
@@ -133,7 +145,12 @@ export function classifyHandPose(landmarks: Landmark3D[]): HandPoseResult {
 
   // 3. PINCH: thumb tip meets index tip while middle/ring/pinky are curled.
   //    (pinchDistance normalized by palm size for depth robustness)
-  if (metrics.pinchDistance < 0.45) {
+  //    Hysteresis: entering requires a tight pinch; releasing requires
+  //    clearly opening past the exit threshold.
+  const pinchThreshold = options?.pinchActive
+    ? PINCH_EXIT_THRESHOLD
+    : PINCH_ENTER_THRESHOLD;
+  if (metrics.pinchDistance < pinchThreshold) {
     if (isMiddleCurled && isRingCurled && isPinkyCurled) {
       const tightness = 1 - Math.min(1, metrics.pinchDistance / 0.45);
       const confidence = Math.max(0.82, Math.min(0.98, 0.82 + tightness * 0.16));

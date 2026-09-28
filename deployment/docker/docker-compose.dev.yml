@@ -11,11 +11,16 @@ services:
       - "5432:5432"
     volumes:
       - amap_dev_postgres_data:/var/lib/postgresql/data
-    # Schema is applied by the migration runner (database/migrations 001..051)
+    # Schema is applied by the migration runner (database/migrations 001..052)
     # + seed, never by the consolidated schema.sql snapshot (it only covers
     # migrations 001-040). From the repo root run:
     #   DATABASE_URL=postgresql://amap_user:change_me@localhost:5432/amap \
     #     python scripts/migrate.py && python scripts/seed.py
+    #
+    # Voice (/voice/transcribe) additionally needs the local faster-whisper
+    # model, which is gitignored and must be built once per machine:
+    #   python scripts/prefetch_whisper_model.py
+    # (writes backend/.whisper_cache/tiny; verified by backend voice tests)
 
   redis:
     image: redis:7-alpine

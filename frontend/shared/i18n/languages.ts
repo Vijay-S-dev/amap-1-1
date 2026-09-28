@@ -143,6 +143,10 @@ export const DICTIONARY: Record<SupportedLanguage, Record<string, string>> = {
     cursor_state_released: 'Released',
     cursor_state_paused: 'Paused',
     cursor_state_estopped: 'EMERGENCY STOP',
+    phase_complete_title: 'Phase Completed',
+    phase_complete_body: 'You successfully completed this phase.',
+    phase_complete_continue: 'Continue',
+    phase_complete_steps: '{done} of {total} steps',
   },
   hi: {
     app_title: 'एक्सेसिबल मल्टीमॉडल असेंबली प्लेटफॉर्म (AMAP)',
@@ -267,6 +271,10 @@ export const DICTIONARY: Record<SupportedLanguage, Record<string, string>> = {
     cursor_state_released: 'मुक्त',
     cursor_state_paused: 'रुका हुआ',
     cursor_state_estopped: 'आपातकालीन रोक',
+    phase_complete_title: 'चरण पूर्ण हुआ',
+    phase_complete_body: 'आपने यह चरण सफलतापूर्वक पूरा कर लिया है।',
+    phase_complete_continue: 'आगे बढ़ें',
+    phase_complete_steps: '{total} में से {done} चरण',
   },
 };
 

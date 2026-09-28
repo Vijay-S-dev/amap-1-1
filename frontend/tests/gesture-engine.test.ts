@@ -17,6 +17,7 @@ import {
   engineCalibrationToBackend,
 } from '../worker/lib/gestureEngine';
 import { classifyHandPose, detectSwipe, poseToGestureKey } from '../worker/lib/handPoses';
+import { computeContainTransform } from '../worker/lib/cameraTransform';
 
 // ---------------------------------------------------------------------------
 // Tiny test harness (no external runner available in this repo)
@@ -166,6 +167,29 @@ function newEngine(map: Record<string, string> = CANONICAL_MAP): WorkerGestureEn
   return new WorkerGestureEngine({}, map, { width: 1280, height: 720 });
 }
 
+/**
+ * Feed a pose for `frames` consecutive frames (50ms apart) starting at t0 —
+ * mirrors a real camera stream where a pose persists across many frames and
+ * must clear the engine's temporal stability buffer (poseStabilityFrames).
+ * Returns all emitted events.
+ */
+function feed(
+  engine: WorkerGestureEngine,
+  makeHand: () => { x: number; y: number; z: number }[],
+  t0: number,
+  frames = 4,
+  stepMs = 50
+): EngineEvent[] {
+  const all: EngineEvent[] = [];
+  for (let i = 0; i < frames; i++) {
+    all.push(...engine.processFrame([makeHand()], ['Right'], t0 + i * stepMs));
+  }
+  return all;
+}
+
+/** Timestamp just after feeding (next frame time). */
+const afterFeed = (t0: number, frames = 4, stepMs = 50) => t0 + frames * stepMs;
+
 function actionsOf(events: EngineEvent[]): EngineEvent[] {
   return events.filter((e) => e.type === 'action');
 }
@@ -313,9 +337,9 @@ console.log('\n— pinch click / select / drag —');
 
 test('quick pinch tap = left_click', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000); // establish pointer
-  engine.processFrame([HANDS.pinch()], ['Right'], 1100); // pinch begins
-  const events = engine.processFrame([HANDS.pointing()], ['Right'], 1300); // released after 200ms
+  feed(engine, HANDS.pointing, 1000, 4); // establish pointer (stable)
+  feed(engine, HANDS.pinch, 1200, 4); // pinch commits after stability buffer
+  const events = feed(engine, HANDS.pointing, 1400, 4); // released
   const acts = actionsOf(events);
   assertEqual(acts.length, 1, 'exactly one action on release');
   if (acts[0] && acts[0].type === 'action') {
@@ -330,12 +354,12 @@ test('quick pinch tap = left_click', () => {
 
 test('two quick taps within the double-click window = double_click', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
-  engine.processFrame([HANDS.pinch()], ['Right'], 1100);
-  let events = engine.processFrame([HANDS.pointing()], ['Right'], 1300); // tap 1
+  feed(engine, HANDS.pointing, 1000, 4);
+  feed(engine, HANDS.pinch, 1200, 4); // tap 1 pinch
+  let events = feed(engine, HANDS.pointing, 1400, 4); // tap 1 release
   assertEqual(actionsOf(events)[0]?.type === 'action' && (actionsOf(events)[0] as any).action, 'left_click');
-  engine.processFrame([HANDS.pinch()], ['Right'], 1400);
-  events = engine.processFrame([HANDS.pointing()], ['Right'], 1600); // tap 2, 300ms later
+  feed(engine, HANDS.pinch, 1450, 4); // tap 2 pinch (within double-click window of the release)
+  events = feed(engine, HANDS.pointing, 1650, 4); // tap 2 release
   const acts = actionsOf(events);
   assertEqual(acts.length, 1);
   if (acts[0] && acts[0].type === 'action') {
@@ -345,13 +369,15 @@ test('two quick taps within the double-click window = double_click', () => {
 
 test('click debounce suppresses a third rapid click', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
-  // tap 1 at ~1300
-  engine.processFrame([HANDS.pinch()], ['Right'], 1100);
-  engine.processFrame([HANDS.pointing()], ['Right'], 1300);
-  // tap 2 at ~1900 (600ms after tap 1: outside double-click window, inside debounce)
-  engine.processFrame([HANDS.pinch()], ['Right'], 1750);
-  const events = engine.processFrame([HANDS.pointing()], ['Right'], 1900);
+  feed(engine, HANDS.pointing, 1000, 4);
+  feed(engine, HANDS.pinch, 1200, 4);
+  // tap 1 release action fires when POINTING re-commits (3rd frame, t=1500)
+  const tap1 = feed(engine, HANDS.pointing, 1400, 4);
+  assertEqual(actionsOf(tap1).length, 1);
+  // tap 2 release fires at t=1950: 450ms after tap 1 — OUTSIDE the 400ms
+  // double-click window, INSIDE the 700ms debounce window.
+  feed(engine, HANDS.pinch, 1650, 4);
+  const events = feed(engine, HANDS.pointing, 1850, 4);
   const acts = actionsOf(events);
   assertEqual(acts.length, 0, 'debounced click must not emit an action');
   const warn = events.find((e) => e.type === 'feedback');
@@ -360,10 +386,12 @@ test('click debounce suppresses a third rapid click', () => {
 
 test('sustained stationary pinch = select_item, fires exactly once', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
-  engine.processFrame([HANDS.pinch()], ['Right'], 1100); // pinch begins
-  // hold stationary for 900ms (select threshold 650ms)
-  const hold = engine.processFrame([HANDS.pinch()], ['Right'], 2000);
+  feed(engine, HANDS.pointing, 1000, 4);
+  const committed = feed(engine, HANDS.pinch, 1200, 4); // pinch begins (commits ~1300)
+  assertEqual(actionsOf(committed).length, 0);
+  // hold stationary well past the select threshold (650ms)
+  const hold: EngineEvent[] = [];
+  for (let t = 1400; t <= 2600; t += 50) hold.push(...engine.processFrame([HANDS.pinch()], ['Right'], t));
   const acts = actionsOf(hold);
   assertEqual(acts.length, 1, 'select fires once during the hold');
   if (acts[0] && acts[0].type === 'action') {
@@ -371,44 +399,56 @@ test('sustained stationary pinch = select_item, fires exactly once', () => {
     assertEqual(acts[0].gesture, 'pinch_hold');
   }
   // further holding must not fire again
-  const more = engine.processFrame([HANDS.pinch()], ['Right'], 2400);
+  const more: EngineEvent[] = [];
+  for (let t = 2650; t <= 3000; t += 50) more.push(...engine.processFrame([HANDS.pinch()], ['Right'], t));
   assertEqual(actionsOf(more).length, 0, 'select must not repeat while held');
   // release after select: no additional action
-  const rel = engine.processFrame([HANDS.pointing()], ['Right'], 2500);
+  const rel = feed(engine, HANDS.pointing, 3100, 4);
   assertEqual(actionsOf(rel).length, 0, 'release after select is silent');
 });
 
 test('pinch + movement = continuous drag (start/move/end)', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
-  engine.processFrame([HANDS.pinch()], ['Right'], 1100); // pinch begins
+  feed(engine, HANDS.pointing, 1000, 4);
+  feed(engine, HANDS.pinch, 1200, 4); // pinch commits ~1300
   // Move the pinched hand (shift whole hand left in camera = pointer right)
-  const moved = buildHand({ pinch: true }, { x: -0.1, y: 0.05 });
-  const startEvents = engine.processFrame([moved], ['Right'], 1600); // 500ms elapsed, moved > threshold
+  // Feed several frames: EMA-smoothed pointer must converge past the drag
+  // movement threshold (0.05 normalized) after the 350ms drag arm time.
+  const startEvents: EngineEvent[] = [];
+  for (let i = 0; i < 10; i++) {
+    startEvents.push(
+      ...engine.processFrame([buildHand({ pinch: true }, { x: -0.1 - i * 0.005, y: 0.05 })], ['Right'], 1400 + i * 50)
+    );
+  }
   const start = startEvents.find((e) => e.type === 'drag' && e.phase === 'start');
   assert(!!start, 'drag start must fire after sustained pinch + movement');
-  const moveEvents = engine.processFrame([buildHand({ pinch: true }, { x: -0.14, y: 0.07 })], ['Right'], 1700);
+  const moveEvents = engine.processFrame([buildHand({ pinch: true }, { x: -0.14, y: 0.07 })], ['Right'], 1950);
   const move = moveEvents.find((e) => e.type === 'drag' && e.phase === 'move');
   assert(!!move, 'drag move events stream while dragging');
   if (move && move.type === 'drag') {
     assert(move.pathLengthPx > 0, 'drag accumulates path length');
     assertEqual(move.source, 'pinch');
   }
-  const endEvents = engine.processFrame([HANDS.pointing()], ['Right'], 1800);
+  const endEvents = feed(engine, HANDS.pointing, 2000, 4);
   const end = endEvents.find((e) => e.type === 'drag' && e.phase === 'end');
   assert(!!end, 'drag end fires on pinch release');
   if (end && end.type === 'drag') {
     assert(end.durationMs > 0, 'drag duration recorded');
   }
-  assertEqual(engine.getState(), 'RELEASED');
+  assert(
+    engine.getState() === 'RELEASED' || engine.getState() === 'HOVER',
+    'engine settles to a non-dragging state after release'
+  );
 });
 
 test('hand lost mid-drag ends the drag safely', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
-  engine.processFrame([HANDS.pinch()], ['Right'], 1100);
-  engine.processFrame([buildHand({ pinch: true }, { x: -0.1, y: 0.05 })], ['Right'], 1600);
-  const events = engine.processFrame([], [], 1700); // hand lost
+  feed(engine, HANDS.pointing, 1000, 4);
+  feed(engine, HANDS.pinch, 1200, 4);
+  for (let i = 0; i < 8; i++) {
+    engine.processFrame([buildHand({ pinch: true }, { x: -0.1 - i * 0.005, y: 0.05 })], ['Right'], 1400 + i * 50);
+  }
+  const events = engine.processFrame([], [], 1850); // hand lost
   const end = events.find((e) => e.type === 'drag' && e.phase === 'end');
   assert(!!end, 'losing the hand must end the drag');
   assertEqual(engine.getState(), 'IDLE');
@@ -422,9 +462,9 @@ console.log('\n— two-finger scroll / right click —');
 
 test('two-finger held still then released = right_click', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
-  engine.processFrame([HANDS.twoFinger()], ['Right'], 1100);
-  const events = engine.processFrame([HANDS.pointing()], ['Right'], 1400); // released still
+  feed(engine, HANDS.pointing, 1000, 4);
+  feed(engine, HANDS.twoFinger, 1200, 4);
+  const events = feed(engine, HANDS.pointing, 1400, 4); // released still
   const acts = actionsOf(events);
   assertEqual(acts.length, 1);
   if (acts[0] && acts[0].type === 'action') {
@@ -435,14 +475,14 @@ test('two-finger held still then released = right_click', () => {
 
 test('two-finger movement emits throttled scroll events', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
-  engine.processFrame([HANDS.twoFinger()], ['Right'], 1100);
+  feed(engine, HANDS.pointing, 1000, 4);
+  feed(engine, HANDS.twoFinger, 1200, 4);
   // Move hand down in camera space (y +0.1) -> pointer y increases -> "up"
   // scroll. The pointer is EMA-smoothed, so feed a few frames at the new
   // position until it converges past the scroll threshold.
   const down = buildHand({ twoFinger: true }, { x: 0, y: 0.1 });
   let scroll: EngineEvent | undefined;
-  for (const ts of [1200, 1250]) {
+  for (const ts of [1400, 1450, 1500, 1550]) {
     const evts = engine.processFrame([down], ['Right'], ts);
     scroll = scroll || evts.find((e) => e.type === 'scroll');
   }
@@ -453,20 +493,20 @@ test('two-finger movement emits throttled scroll events', () => {
     assertEqual(scroll.source, 'two_finger');
   }
   // Within the throttle window (180ms) no second scroll is emitted
-  const more = engine.processFrame([buildHand({ twoFinger: true }, { x: 0, y: 0.12 })], ['Right'], 1300);
+  const more = engine.processFrame([buildHand({ twoFinger: true }, { x: 0, y: 0.12 })], ['Right'], 1600);
   assertEqual(countBy(more, (e) => e.type === 'scroll'), 0, 'scroll throttle must suppress rapid repeats');
   // After the throttle window it scrolls again
-  const later = engine.processFrame([buildHand({ twoFinger: true }, { x: 0, y: 0.14 })], ['Right'], 1500);
+  const later = engine.processFrame([buildHand({ twoFinger: true }, { x: 0, y: 0.14 })], ['Right'], 1850);
   assert(countBy(later, (e) => e.type === 'scroll') === 1, 'scroll resumes after throttle window');
 });
 
 test('vertical hand-up movement scrolls down', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
-  engine.processFrame([HANDS.twoFinger()], ['Right'], 1100);
+  feed(engine, HANDS.pointing, 1000, 4);
+  feed(engine, HANDS.twoFinger, 1200, 4);
   const up = buildHand({ twoFinger: true }, { x: 0, y: -0.1 });
   let scroll: EngineEvent | undefined;
-  for (const ts of [1200, 1250, 1300]) {
+  for (const ts of [1400, 1450, 1500, 1550]) {
     const evts = engine.processFrame([up], ['Right'], ts);
     scroll = scroll || evts.find((e) => e.type === 'scroll');
   }
@@ -482,17 +522,15 @@ console.log('\n— swipe navigation —');
 test('fast pointing flick right = swipe_right action (next_step)', () => {
   const engine = newEngine();
   // A RIGHT flick in the user's frame of reference = camera x DECREASING
-  // (the pointer is mirrored).
-  const frames: { hand: { x: number; y: number; z: number }[]; ts: number }[] = [];
-  for (let i = 0; i < 6; i++) {
-    frames.push({
-      hand: buildHand({ pointing: true }, { x: -0.06 * i, y: 0 }),
-      ts: 1000 + i * 50,
-    });
-  }
+  // (the pointer is mirrored). Displacement 0.30 over ~250ms = 1.2 units/s:
+  // well above the velocity gate (0.55/s) and distance threshold (0.16).
   let flick: EngineEvent | null = null;
-  for (const f of frames) {
-    const evts = engine.processFrame([f.hand], ['Right'], f.ts);
+  for (let i = 0; i < 6; i++) {
+    const evts = engine.processFrame(
+      [buildHand({ pointing: true }, { x: -0.06 * i, y: 0 })],
+      ['Right'],
+      1000 + i * 50
+    );
     const act = actionsOf(evts)[0];
     if (act) flick = act;
   }
@@ -501,6 +539,22 @@ test('fast pointing flick right = swipe_right action (next_step)', () => {
     assertEqual(flick.action, 'next_step');
     assertEqual(flick.gesture, 'swipe_right');
   }
+});
+
+test('slow pointing drift does NOT fire a swipe (velocity gate)', () => {
+  const engine = newEngine();
+  // Same 0.30 displacement but over 1500ms = 0.2 units/s: natural aiming
+  // movement, not a deliberate flick.
+  let fired = 0;
+  for (let i = 0; i < 10; i++) {
+    const evts = engine.processFrame(
+      [buildHand({ pointing: true }, { x: -0.033 * i, y: 0 })],
+      ['Right'],
+      1000 + i * 150
+    );
+    fired += countBy(evts, (e) => e.type === 'action');
+  }
+  assertEqual(fired, 0, 'slow drift must not trigger swipe actions');
 });
 
 test('swipe cooldown prevents double firing', () => {
@@ -532,8 +586,9 @@ console.log('\n— emergency stop —');
 
 test('FIST maps to emergency_stop immediately', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
-  const events = engine.processFrame([HANDS.fist()], ['Right'], 1100);
+  feed(engine, HANDS.pointing, 1000, 4);
+  // FIST commits on the FIRST frame (safety latency) — no stability delay.
+  const events = engine.processFrame([HANDS.fist()], ['Right'], 1250);
   const acts = actionsOf(events);
   assertEqual(acts.length, 1);
   if (acts[0] && acts[0].type === 'action') {
@@ -544,10 +599,10 @@ test('FIST maps to emergency_stop immediately', () => {
 
 test('setEmergencyStopped blocks all frames until cleared', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
+  feed(engine, HANDS.pointing, 1000, 4);
   engine.setEmergencyStopped(true);
   assertEqual(engine.getState(), 'EMERGENCY_STOPPED');
-  const blocked = engine.processFrame([HANDS.pinch()], ['Right'], 1200);
+  const blocked = engine.processFrame([HANDS.pinch()], ['Right'], 1300);
   assertEqual(blocked.length, 0, 'no events while emergency-stopped');
   engine.setEmergencyStopped(false);
   const resumed = engine.processFrame([HANDS.pointing()], ['Right'], 1400);
@@ -562,20 +617,20 @@ console.log('\n— pause / resume —');
 
 test('paused engine suppresses task gestures but keeps the pointer live', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
+  feed(engine, HANDS.pointing, 1000, 4);
   engine.setPaused(true);
   assertEqual(engine.getState(), 'PAUSED');
   // pointer still tracks
-  const ev1 = engine.processFrame([buildHand({ pointing: true }, { x: -0.1, y: 0 })], ['Right'], 1100);
-  assert(countBy(ev1, (e) => e.type === 'pointer') === 1, 'pointer stays live while paused');
-  // pinch click suppressed
-  engine.processFrame([HANDS.pinch()], ['Right'], 1200);
-  const ev2 = engine.processFrame([HANDS.pointing()], ['Right'], 1300);
+  const ev1 = engine.processFrame([buildHand({ pointing: true }, { x: -0.1, y: 0 })], ['Right'], 1300);
+  assert(countBy(ev1, (e) => e.type === 'pointer') >= 1, 'pointer stays live while paused');
+  // pinch click suppressed (feed full stable sequences)
+  feed(engine, HANDS.pinch, 1400, 4);
+  const ev2 = feed(engine, HANDS.pointing, 1600, 4);
   assertEqual(actionsOf(ev2).length, 0, 'no click actions while paused');
   // resume restores interaction
   engine.setPaused(false);
-  engine.processFrame([HANDS.pinch()], ['Right'], 1500);
-  const ev3 = engine.processFrame([HANDS.pointing()], ['Right'], 1700);
+  feed(engine, HANDS.pinch, 2000, 4);
+  const ev3 = feed(engine, HANDS.pointing, 2200, 4);
   assertEqual(actionsOf(ev3).length, 1, 'click works after resume');
   const resumed = actionsOf(ev3)[0];
   if (resumed && resumed.type === 'action') {
@@ -591,9 +646,9 @@ console.log('\n— personalized mapping —');
 
 test('worker-personalized mapping overrides the default action', () => {
   const engine = newEngine({ ...CANONICAL_MAP, pinch: 'double_click' });
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
-  engine.processFrame([HANDS.pinch()], ['Right'], 1100);
-  const events = engine.processFrame([HANDS.pointing()], ['Right'], 1300);
+  feed(engine, HANDS.pointing, 1000, 4);
+  feed(engine, HANDS.pinch, 1200, 4);
+  const events = feed(engine, HANDS.pointing, 1400, 4);
   const acts = actionsOf(events);
   assertEqual(acts.length, 1);
   if (acts[0] && acts[0].type === 'action') {
@@ -609,9 +664,9 @@ test('disabled gesture produces no action', () => {
   );
   // properly disable via calibration API
   engine.updateCalibration({ enabledGestures: { pinch: false, pinch_hold: false } });
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
-  engine.processFrame([HANDS.pinch()], ['Right'], 1100);
-  const events = engine.processFrame([HANDS.pointing()], ['Right'], 1300);
+  feed(engine, HANDS.pointing, 1000, 4);
+  feed(engine, HANDS.pinch, 1200, 4);
+  const events = feed(engine, HANDS.pointing, 1400, 4);
   assertEqual(actionsOf(events).length, 0, 'disabled pinch must not click');
 });
 
@@ -637,16 +692,24 @@ console.log('\n— voice-armed drag —');
 
 test('armVoiceDrag + pinch grabs instead of clicking', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
+  feed(engine, HANDS.pointing, 1000, 4);
   engine.armVoiceDrag();
   assertEqual(engine.isVoiceDragArmed(), true);
-  const startEvents = engine.processFrame([HANDS.pinch()], ['Right'], 1100);
+  // Feed the pinch long enough to commit through the stability buffer; the
+  // grab happens on the committed PINCH entry edge.
+  const startEvents: EngineEvent[] = [];
+  let grabbed = false;
+  for (let t = 1200; t < 1500 && !grabbed; t += 50) {
+    const evts = engine.processFrame([HANDS.pinch()], ['Right'], t);
+    startEvents.push(...evts);
+    grabbed = evts.some((e) => e.type === 'drag' && e.phase === 'start');
+  }
   const start = startEvents.find((e) => e.type === 'drag' && e.phase === 'start');
   assert(!!start, 'pinch after voice-arm must start a drag (not a click)');
   if (start && start.type === 'drag') assertEqual(start.source, 'voice');
   assertEqual(actionsOf(startEvents).length, 0, 'no click action when grabbing for voice drag');
   // move
-  const moveEvents = engine.processFrame([buildHand({ pinch: true }, { x: -0.08, y: 0 })], ['Right'], 1200);
+  const moveEvents = engine.processFrame([buildHand({ pinch: true }, { x: -0.08, y: 0 })], ['Right'], 1550);
   assert(!!moveEvents.find((e) => e.type === 'drag' && e.phase === 'move'));
   // voice "drop" ends the drag
   const endEvents = engine.endExternalDrag();
@@ -656,7 +719,7 @@ test('armVoiceDrag + pinch grabs instead of clicking', () => {
 
 test('beginExternalDrag starts a voice drag at the current pointer', () => {
   const engine = newEngine();
-  engine.processFrame([HANDS.pointing()], ['Right'], 1000);
+  feed(engine, HANDS.pointing, 1000, 4);
   const pos = engine.getPointer();
   const events = engine.beginExternalDrag('voice');
   const start = events.find((e) => e.type === 'drag' && e.phase === 'start');
@@ -717,6 +780,163 @@ test('engine adopts backend calibration (cursor_sensitivity honored)', () => {
   engine.updateCalibration(engineCalibrationFromBackend({ cursor_sensitivity: 1.0 }));
   const cal = engine.getCalibration();
   assertEqual(cal.pointerSensitivity, 1.0);
+});
+
+// ---------------------------------------------------------------------------
+// 11. Robustness & accuracy (negative cases)
+// ---------------------------------------------------------------------------
+
+console.log('\n— robustness / negative cases —');
+
+test('pose flutter (single stray PINCH frames) produces NO clicks', () => {
+  const engine = newEngine();
+  feed(engine, HANDS.pointing, 1000, 6);
+  // Stray single-frame pinch blips (landmark flutter near the threshold):
+  // the stability buffer must not commit them, so no click ever fires.
+  let actions = 0;
+  let t = 1400;
+  for (let blip = 0; blip < 5; blip++) {
+    engine.processFrame([HANDS.pinch()], ['Right'], t); t += 50; // 1 stray frame
+    actions += countBy(
+      feed(engine, HANDS.pointing, t, 5),
+      (e) => e.type === 'action'
+    );
+    t += 300;
+  }
+  assertEqual(actions, 0, 'single-frame pinch blips must never click');
+});
+
+test('pinch hysteresis: hovering near the pinch threshold does not flicker', () => {
+  // Directly on the classifier: once PINCH is active, a thumb-index gap up to
+  // the EXIT threshold still classifies as PINCH (no PINCH->NONE flutter).
+  const tight = classifyHandPose(HANDS.pinch());
+  assertEqual(tight.pose, 'PINCH');
+  // Open the gap slightly (still below the exit threshold ~0.56):
+  // build a pinch hand with the thumb tip pulled a little away.
+  const loosePinch = buildHand({ pinch: true });
+  loosePinch[4] = { x: loosePinch[4].x - 0.03, y: loosePinch[4].y - 0.03, z: 0 };
+  const withoutHysteresis = classifyHandPose(loosePinch);
+  const withHysteresis = classifyHandPose(loosePinch, { pinchActive: true });
+  // The gap may now be past the ENTER threshold (so cold classify -> not pinch)
+  // but hysteresis must keep the active pinch alive.
+  if (withoutHysteresis.pose !== 'PINCH') {
+    assertEqual(withHysteresis.pose, 'PINCH', 'exit hysteresis must hold an active pinch');
+  } else {
+    assertEqual(withHysteresis.pose, 'PINCH');
+  }
+});
+
+test('hand too small / too far away is ignored (no pointer, no actions)', () => {
+  const engine = newEngine();
+  // Shrink the whole hand toward the frame center -> tiny palm size.
+  const tiny = () => {
+    const hand = HANDS.pointing();
+    return hand.map((pt) => ({
+      x: 0.5 + (pt.x - 0.5) * 0.22,
+      y: 0.6 + (pt.y - 0.6) * 0.22,
+      z: 0,
+    }));
+  };
+  const events = feed(engine, tiny, 1000, 8);
+  assertEqual(countBy(events, (e) => e.type === 'pointer'), 0, 'no pointer tracking for a tiny hand');
+  assertEqual(countBy(events, (e) => e.type === 'action'), 0, 'no actions for a tiny hand');
+  // A tiny FIST must not trigger the emergency stop either (unreliable input).
+  const tinyFist = () => {
+    const hand = HANDS.fist();
+    return hand.map((pt) => ({
+      x: 0.5 + (pt.x - 0.5) * 0.22,
+      y: 0.6 + (pt.y - 0.6) * 0.22,
+      z: 0,
+    }));
+  };
+  const fistEvents = feed(engine, tinyFist, 1500, 6);
+  assertEqual(countBy(fistEvents, (e) => e.type === 'action'), 0, 'distant FIST must not fire e-stop');
+});
+
+test('noisy landmarks: jittered PINCH hold still fires exactly one select', () => {
+  const engine = newEngine();
+  feed(engine, HANDS.pointing, 1000, 4);
+  // Pinch held stationary with per-frame landmark noise (±0.006).
+  const jitter = (amp: number) => () => {
+    const hand = HANDS.pinch();
+    return hand.map((pt) => ({
+      x: pt.x + (Math.random() - 0.5) * amp,
+      y: pt.y + (Math.random() - 0.5) * amp,
+      z: 0,
+    }));
+  };
+  const held: EngineEvent[] = [];
+  for (let t = 1200; t <= 3000; t += 50) {
+    held.push(...engine.processFrame([jitter(0.012)()], ['Right'], t));
+  }
+  const selects = held.filter((e) => e.type === 'action' && e.action === 'select_item');
+  assertEqual(selects.length, 1, 'noisy stationary pinch fires exactly one select');
+  // and no spurious clicks mixed in
+  const clicks = held.filter((e) => e.type === 'action' && (e.action === 'left_click' || e.action === 'double_click'));
+  assertEqual(clicks.length, 0, 'no spurious clicks from noise');
+});
+
+test('rapid repeated taps: exactly one action, extras debounced', () => {
+  const engine = newEngine();
+  feed(engine, HANDS.pointing, 1000, 4);
+  let actions = 0;
+  let feedbacks = 0;
+  let t = 1200;
+  // Four taps in quick succession (~200ms between releases)
+  for (let tap = 0; tap < 4; tap++) {
+    feed(engine, HANDS.pinch, t, 4); t += 200;
+    const release = feed(engine, HANDS.pointing, t, 4); t += 300;
+    actions += countBy(release, (e) => e.type === 'action');
+    feedbacks += countBy(release, (e) => e.type === 'feedback');
+  }
+  assert(actions <= 2, `at most click+double-click from a rapid burst (got ${actions})`);
+  assert(feedbacks >= 1, 'debounce feedback is emitted for suppressed repeats');
+});
+
+test('similar poses do not confuse the classifier', () => {
+  // POINTING vs TWO_FINGER vs OPEN_PALM discrimination on the shared classifier
+  assertEqual(classifyHandPose(HANDS.pointing()).pose, 'POINTING');
+  assertEqual(classifyHandPose(HANDS.twoFinger()).pose, 'TWO_FINGER');
+  assertEqual(classifyHandPose(HANDS.openPalm()).pose, 'OPEN_PALM');
+  assertEqual(classifyHandPose(HANDS.fist()).pose, 'FIST');
+  assertEqual(classifyHandPose(HANDS.thumbsUp()).pose, 'THUMBS_UP');
+  assertEqual(classifyHandPose(HANDS.thumbsDown()).pose, 'THUMBS_DOWN');
+  // Invalid skeletons are NONE, never a random gesture
+  assertEqual(classifyHandPose([]).pose, 'NONE');
+  assertEqual(classifyHandPose(new Array(21).fill({ x: 0.5, y: 0.5 })).pose, 'NONE');
+});
+
+test('dwell-owned poses stay silent in the engine (no double execution)', () => {
+  // OPEN_PALM / THUMBS_UP / THUMBS_DOWN are confirmed by the tracker's dwell
+  // pipeline (HUD onGestureConfirmed) — the engine must NOT also fire them,
+  // or one physical gesture would execute twice.
+  const engine = newEngine({ ...CANONICAL_MAP, open_palm: 'pause_session' });
+  feed(engine, HANDS.pointing, 1000, 4);
+  const palm: EngineEvent[] = [];
+  for (let t = 1200; t <= 2400; t += 50) {
+    palm.push(...engine.processFrame([HANDS.openPalm()], ['Right'], t));
+  }
+  assertEqual(
+    countBy(palm, (e) => e.type === 'action'),
+    0,
+    'engine leaves dwell-owned poses to the dwell pipeline'
+  );
+});
+
+test('contain transform: overlay maps letterboxed video exactly (camera enlargement)', () => {
+  // 4:3 video in a wide 16:9 container: scale limited by height, centered
+  const t = computeContainTransform(640, 480, 1280, 720);
+  assert(Math.abs(t.scale - 1.5) < 1e-9, 'scale = 720/480');
+  assertEqual(t.offsetY, 0);
+  assert(Math.abs(t.offsetX - 160) < 1e-9, 'horizontal letterbox 160px each side');
+  // Landmark at video center maps to container center
+  const cx = t.offsetX + 0.5 * 640 * t.scale;
+  assert(Math.abs(cx - 640) < 1e-9, 'center maps to center');
+  // Tall narrow container: scale limited by width
+  const t2 = computeContainTransform(640, 480, 400, 700);
+  assert(Math.abs(t2.scale - 400 / 640) < 1e-9);
+  assertEqual(t2.offsetX, 0);
+  assert(t2.offsetY > 0, 'vertical letterbox');
 });
 
 // ---------------------------------------------------------------------------

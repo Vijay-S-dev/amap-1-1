@@ -17,9 +17,9 @@ services:
     networks:
       - amap-internal
 
-  # Applies database/migrations 001..051 then the seed (idempotent).
+  # Applies database/migrations 001..052 then the seed (idempotent).
   # The consolidated database/schema/schema.sql snapshot (001-040) is NOT
-  # used: it predates migrations 041-051.
+  # used: it predates migrations 041-052.
   migrate:
     build:
       context: ../..
@@ -55,6 +55,31 @@ services:
     networks:
       - amap-internal
 
+  # One-shot: builds the local faster-whisper tiny model (EN+HI) into the
+  # shared amap_whisper_cache volume so /voice/transcribe works on a fresh
+  # deployment without any network access at runtime. Skips instantly when
+  # the volume already contains the model.
+  whisper-prefetch:
+    build:
+      context: ../..
+      dockerfile: deployment/docker/Dockerfile.whisper
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ -f /cache/tiny/model.bin ]; then
+          echo "whisper model already present in volume"
+        else
+          python /work/scripts/prefetch_whisper_model.py &&
+          mkdir -p /cache &&
+          cp -r /work/backend/.whisper_cache/. /cache/
+        fi
+    volumes:
+      - amap_whisper_cache:/cache
+    restart: "no"
+    networks:
+      - amap-internal
+
   backend:
     build:
       context: ../..
@@ -66,12 +91,18 @@ services:
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       REDIS_URL: redis://:${REDIS_PASSWORD:-amap_redis_secure_pass}@redis:6379/0
       ENVIRONMENT: production
+    volumes:
+      # Local faster-whisper model (built by whisper-prefetch) — the model is
+      # gitignored, so it must be provisioned per-deployment, never baked in.
+      - amap_whisper_cache:/app/backend/.whisper_cache
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       migrate:
+        condition: service_completed_successfully
+      whisper-prefetch:
         condition: service_completed_successfully
     networks:
       - amap-internal
@@ -107,6 +138,7 @@ services:
 volumes:
   amap_prod_postgres_data:
   amap_prod_redis_data:
+  amap_whisper_cache:
 
 networks:
   amap-internal:

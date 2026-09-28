@@ -25,6 +25,10 @@ import { GestureContextMenu } from '@/worker/components/GestureContextMenu';
 import { GestureControlPanel } from '@/worker/components/GestureControlPanel';
 import { AssemblyDragBench } from '@/worker/components/AssemblyDragBench';
 import {
+  PhaseCompletionDialog,
+  PhaseCompletionInfo,
+} from '@/worker/components/PhaseCompletionDialog';
+import {
   WorkerGestureEngine,
   EngineEvent,
   InteractionState,
@@ -108,6 +112,13 @@ export default function WorkerPage() {
   const [executionError, setExecutionError] = useState<string | null>(null);
   const [taskLoadingError, setTaskLoadingError] = useState<string | null>(null);
   const [isSessionEnded, setIsSessionEnded] = useState<boolean>(false);
+  /**
+   * Real phase-completion state (from PostgreSQL task_results / assignment
+   * status). null = no completed-phase dialog to show. Persisted
+   * acknowledgement is a UI preference only — the completed state itself is
+   * authoritative in the backend.
+   */
+  const [phaseCompletion, setPhaseCompletion] = useState<PhaseCompletionInfo | null>(null);
   const [completedTaskResult, setCompletedTaskResult] = useState<any | null>(null);
   const [isExecuting, setIsExecuting] = useState<boolean>(false);
   const [pendingConfirmation, setPendingConfirmation] = useState<{
@@ -287,6 +298,37 @@ export default function WorkerPage() {
         assigned.find((a: any) => a.status === 'active' || a.status === 'in_progress') || assigned[0];
       setAssignmentId(targetAssignment.id);
       setAssignmentStatus(targetAssignment.status);
+
+      // 4b. REAL completion state after refresh / re-login: when the current
+      // assignment is completed in PostgreSQL, surface the success dialog
+      // until the worker acknowledges it (per-assignment; never marks other
+      // assignments complete).
+      if (targetAssignment.status === 'completed') {
+        try {
+          const ackKey = `amap_phase_ack_${targetAssignment.id}`;
+          const alreadyAcknowledged =
+            typeof window !== 'undefined' && window.localStorage.getItem(ackKey) === '1';
+          if (!alreadyAcknowledged) {
+            let result: any = null;
+            try {
+              result = await api.getTaskResult(targetAssignment.id);
+            } catch {
+              result = null;
+            }
+            const details = await api.getTaskDetails(targetAssignment.task_id).catch(() => null);
+            setPhaseCompletion({
+              assignmentId: targetAssignment.id,
+              taskName: details?.name || 'Assigned phase',
+              completedSteps: result?.result_data?.completed_steps ?? details?.steps?.length ?? 0,
+              totalSteps: result?.result_data?.total_steps ?? details?.steps?.length ?? 0,
+              outcome: result?.outcome || 'completed',
+              durationSeconds: result?.result_data?.duration_seconds ?? null,
+            });
+          }
+        } catch (completionErr) {
+          console.warn('Completion-state restore notice:', completionErr);
+        }
+      }
 
       let currentWfAssignId = targetAssignment.workflow_assignment_id || null;
 
@@ -1036,18 +1078,38 @@ export default function WorkerPage() {
 
     try {
       if (assignmentId) {
-        await api.completeTaskAssignment(assignmentId, {
-          outcome: 'completed',
-          result_data: { completed_steps: task?.steps?.length || 0 },
-          notes: 'Assembly completed through accessible multimodal workstation',
-        });
+        // Duplicate-completion prevention: only complete when the backend
+        // still considers the assignment open (completed assignments are
+        // idempotently skipped, never re-completed).
+        if (assignmentStatus !== 'completed') {
+          await api.completeTaskAssignment(assignmentId, {
+            outcome: 'completed',
+            result_data: { completed_steps: task?.steps?.length || 0 },
+            notes: 'Assembly completed through accessible multimodal workstation',
+          });
+          setAssignmentStatus('completed');
+        }
 
+        let resData: any = null;
         try {
-          const resData = await api.getTaskResult(assignmentId);
+          resData = await api.getTaskResult(assignmentId);
           setCompletedTaskResult(resData);
         } catch (fetchErr) {
           console.warn('Notice: Could not load task result details:', fetchErr);
         }
+
+        // SUCCESS DIALOG: triggered strictly by the real backend completion
+        // state (task_result row in PostgreSQL), never by UI step position.
+        // We only reach here when completeTaskAssignment succeeded OR the
+        // assignment was already completed in the backend.
+        setPhaseCompletion({
+          assignmentId,
+          taskName: task?.name || 'Assigned phase',
+          completedSteps: resData?.result_data?.completed_steps ?? task?.steps?.length ?? 0,
+          totalSteps: resData?.result_data?.total_steps ?? task?.steps?.length ?? 0,
+          outcome: resData?.outcome || 'completed',
+          durationSeconds: resData?.result_data?.duration_seconds ?? null,
+        });
       }
       // End the work session so the supervisor monitor reflects reality.
       if (session && session.status !== 'completed') {
@@ -1072,6 +1134,19 @@ export default function WorkerPage() {
       setIsExecuting(false);
     }
   };
+
+  /** Acknowledge the phase-completion dialog (UI preference only — the
+   *  completed state stays authoritative in PostgreSQL). */
+  const handlePhaseContinue = useCallback(() => {
+    setPhaseCompletion((current) => {
+      if (current?.assignmentId && typeof window !== 'undefined') {
+        window.localStorage.setItem(`amap_phase_ack_${current.assignmentId}`, '1');
+      }
+      return null;
+    });
+    setStatusMessage('Phase completion acknowledged. Outcome recorded in PostgreSQL.');
+    playAudioCue('step');
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // -------------------------------------------------------------------------
   // Assembly bench interaction (drag & drop of real parts)
@@ -1527,8 +1602,19 @@ export default function WorkerPage() {
           </button>
         </div>
       ) : (
-        /* Main Assembly Workstation Grid (§ 15) */
+        /* Main Assembly Workstation Grid (§ 15) — the live camera/gesture
+           area (MultimodalHUD) is the PRIMARY interaction region, followed by
+           the current step instructions and controls. */
         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.5rem' }}>
+          <MultimodalHUD
+            onActionTriggered={handleActionTriggered}
+            workSessionId={session?.id || null}
+            dwellTimeMs={Number(calibration?.dwell_time_ms) || 500}
+            isEmergencyStopped={isEmergencyStopped}
+            onRawHandFrame={handleRawHandFrame}
+            externalGestureRef={engineGestureRef}
+          />
+
           <WorkflowStepViewer
             currentStep={currentStep}
             totalSteps={task.steps.length}
@@ -1550,14 +1636,26 @@ export default function WorkerPage() {
             />
           </WorkflowStepViewer>
 
-          <MultimodalHUD
-            onActionTriggered={handleActionTriggered}
-            workSessionId={session?.id || null}
-            dwellTimeMs={Number(calibration?.dwell_time_ms) || 500}
-            isEmergencyStopped={isEmergencyStopped}
-            onRawHandFrame={handleRawHandFrame}
-            externalGestureRef={engineGestureRef}
-          />
+          <WorkflowStepViewer
+            currentStep={currentStep}
+            totalSteps={task.steps.length}
+            currentStepIndex={currentStepIndex}
+            completedStepIds={completedStepIds}
+            onNextStep={handleNextStep}
+            onPreviousStep={handlePreviousStep}
+            onCompleteStep={handleCompleteStep}
+            onRequestAssistance={() => setIsAssistanceOpen(true)}
+            onEmergencyStop={handleEmergencyStop}
+          >
+            {/* Real drag & drop assembly bench for the current step */}
+            <AssemblyDragBench
+              partId={currentStep.id}
+              partLabel={currentStep.spatialTargetId || `Step ${currentStep.stepNumber} Component`}
+              zoneLabel={`Assembly Zone — Step ${currentStep.stepNumber}`}
+              installed={Boolean(installedParts[currentStep.id]) || currentStepCompleted}
+              onPartInstalled={handlePartInstalled}
+            />
+          </WorkflowStepViewer>
 
           {/* Worker-personalized gesture mapping + calibration (PostgreSQL) */}
           <GestureControlPanel
@@ -1570,6 +1668,9 @@ export default function WorkerPage() {
           />
         </div>
       )}
+
+      {/* Real phase-completion success dialog (backend completion state) */}
+      <PhaseCompletionDialog completion={phaseCompletion} onContinue={handlePhaseContinue} />
 
       {/* Multilingual Assistance Modal (§ 20, § 21) — only with a real
           PostgreSQL work session (no placeholder session ids) */}
