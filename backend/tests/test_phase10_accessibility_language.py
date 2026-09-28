@@ -370,17 +370,25 @@ def test_organization_languages_en_hi_only(client):
 
 
 def test_voice_language_validation_en_hi_only():
-    from services.speech_to_text_service import SpeechToTextService, SUPPORTED_LANGUAGES
+    from services.vosk_stt_service import VoskModelRegistry, SUPPORTED_LANGUAGES
 
     assert tuple(sorted(SUPPORTED_LANGUAGES)) == ("en", "hi")
-    assert SpeechToTextService.validate_language("en") == "en"
-    assert SpeechToTextService.validate_language("hi") == "hi"
-    assert SpeechToTextService.validate_language("en-US") == "en"
-    assert SpeechToTextService.validate_language(None) is None
-    with pytest.raises(ValueError, match="English"):
-        SpeechToTextService.validate_language("fr")
-    with pytest.raises(ValueError, match="English"):
-        SpeechToTextService.validate_language("ta")
+    # Use an isolated registry (never poison the process-wide singleton).
+    VoskModelRegistry.reset_for_tests()
+    try:
+        registry = VoskModelRegistry(models_dir="/tmp/does-not-matter")
+        # supported languages normalize through the registry language gate
+        for good in ("en", "hi", "en-US", "hi-IN"):
+            try:
+                registry.get_model(good)
+            except Exception as exc:  # noqa: BLE001
+                assert "Only English" not in str(exc), good
+        with pytest.raises(Exception, match="Only English"):
+            registry.get_model("fr")
+        with pytest.raises(Exception, match="Only English"):
+            registry.get_model("ta")
+    finally:
+        VoskModelRegistry.reset_for_tests()
 
 
 def test_no_five_language_defaults_remain_in_backend():

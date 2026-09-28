@@ -18,7 +18,7 @@ import { useRouter } from 'next/navigation';
 import { useAccessibility } from '@/shared/theme/AccessibilityContext';
 import { t } from '@/shared/i18n/languages';
 import { api } from '@/shared/api/client';
-import { useVoiceRecorder, TranscriptionResult, VoiceRecorderState } from '@/shared/hooks/useVoiceRecorder';
+import { useVoiceStream, VoiceFinalEvent, VoiceStreamState } from '@/shared/hooks/useVoiceStream';
 import MediaPipeHandTracker from '@/worker/components/MediaPipeHandTracker';
 
 interface TrainingStage {
@@ -325,15 +325,13 @@ export default function TrainingPage() {
     [advanceStage, playAudioCue]
   );
 
-  const handleVoiceTranscript = useCallback(async (result: TranscriptionResult) => {
-    const rawTranscript = result.transcript.trim();
+  const handleVoiceFinal = useCallback(async (event: VoiceFinalEvent) => {
+    const rawTranscript = event.transcript.trim();
     try {
-      const commandResult = await api.processVoiceCommand({
-        raw_transcript: rawTranscript,
-        confidence: result.confidence,
-        language: result.detected_language,
-      });
-      if (commandResult.validation_status !== 'valid' || !commandResult.action_mapping) {
+      // Streaming final: the backend already matched the command through the
+      // existing AMAP VoiceService parser.
+      const commandResult = event.command;
+      if (!commandResult || commandResult.validation_status !== 'valid' || !commandResult.action_mapping) {
         playAudioCue('alert');
         setFeedbackType('warning');
         setFeedbackMessage(`⚠️ Unrecognized speech: "${rawTranscript}". Please repeat the command.`);
@@ -387,21 +385,29 @@ export default function TrainingPage() {
     setFeedbackMessage(`⚠️ ${message}`);
   }, []);
 
-  const handleRecorderState = useCallback((state: VoiceRecorderState) => {
+  const handleRecorderState = useCallback((state: VoiceStreamState) => {
     if (state === 'ERROR') {
       setFeedbackType('error');
-      setFeedbackMessage('⚠️ Microphone or transcription error. Please try again.');
+      setFeedbackMessage('⚠️ Microphone or streaming error. Please try again.');
     }
   }, []);
 
-  const recorder = useVoiceRecorder({
+  const voice = useVoiceStream({
     enabled: voiceRequired,
     language: sttLanguage,
-    onTranscript: handleVoiceTranscript,
+    onFinal: handleVoiceFinal,
     onError: handleVoiceError,
     onStateChange: handleRecorderState,
   });
-  const isListening = recorder.state === 'RECORDING';
+  const isListening =
+    voice.state === 'LISTENING' || voice.state === 'SPEAKING' || voice.state === 'READY';
+
+  // Hands-free: the mic opens automatically while voice is required; the
+  // server-side endpointer finalizes each utterance (no stop button).
+  useEffect(() => {
+    if (voiceRequired) void voice.activate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [voiceRequired]);
 
   const handleEnterWorkspace = () => {
     setHasCompletedTraining(true);
@@ -599,17 +605,36 @@ export default function TrainingPage() {
 
               {voiceRequired && currentStage.expectedModality !== 'gesture' && (
                 <div style={{ marginBottom: '1.5rem', textAlign: 'center' }}>
-                  <button
-                    type="button"
-                    onClick={() => recorder.startRecording()}
-                    disabled={recorder.state === 'RECORDING' || recorder.state === 'PROCESSING'}
-                    className="btn btn-primary"
-                    style={{ minHeight: '52px', minWidth: '180px', fontSize: '1rem', fontWeight: 800 }}
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    className="glass-panel"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      minHeight: '52px',
+                      padding: '0.5rem 1.25rem',
+                      borderRadius: '14px',
+                      fontSize: '1rem',
+                      fontWeight: 800,
+                      color: voice.state === 'SPEAKING' ? 'var(--org-emerald)' : 'var(--text-secondary)',
+                      border:
+                        voice.state === 'SPEAKING'
+                          ? '1px solid var(--org-emerald)'
+                          : '1px solid var(--surface-glass-border)',
+                    }}
                   >
-                    {recorder.state === 'RECORDING' ? '🔴 Listening…' : recorder.state === 'PROCESSING' ? '⏳ Transcribing…' : '🎙️ Speak'}
-                  </button>
+                    {voice.state === 'SPEAKING'
+                      ? `🗣️ “${voice.partialText}”`
+                      : isListening
+                      ? '🎙️ Listening — speak your command'
+                      : voice.state === 'ERROR'
+                      ? '⚠️ Microphone error'
+                      : '🎙️ Opening microphone…'}
+                  </div>
                   <div style={{ marginTop: '0.5rem', color: 'var(--text-muted)', fontSize: '0.78rem' }}>
-                    Auto-stops after silence · mic level {recorder.volumeLevel}%
+                    Speech ends automatically when you pause · mic level {voice.volumeLevel}%
                   </div>
                 </div>
               )}

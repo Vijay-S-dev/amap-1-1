@@ -18,12 +18,13 @@ const outDir = mkdtempSync(join(tmpdir(), 'amap-engine-tests-'));
 
 let exitCode = 1;
 try {
-  // Compile engine + classifier + tests to CommonJS in a temp dir.
+  // Compile engine + classifier + voice-worklet tests to CommonJS in a temp dir.
   execFileSync(
     process.execPath,
     [
       join(frontendRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
       'tests/gesture-engine.test.ts',
+      'tests/voice-worklet.test.ts',
       '--outDir', outDir,
       '--module', 'commonjs',
       '--target', 'es2020',
@@ -35,8 +36,12 @@ try {
     { cwd: frontendRoot, stdio: 'inherit' }
   );
 
-  // Run the compiled test suite.
+  // Run the compiled test suites.
   execFileSync(process.execPath, [join(outDir, 'tests', 'gesture-engine.test.js')], {
+    cwd: frontendRoot,
+    stdio: 'inherit',
+  });
+  execFileSync(process.execPath, [join(outDir, 'tests', 'voice-worklet.test.js')], {
     cwd: frontendRoot,
     stdio: 'inherit',
   });

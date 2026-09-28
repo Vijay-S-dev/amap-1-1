@@ -82,6 +82,24 @@ class ApiClient {
     return this.token;
   }
 
+  /**
+   * Authenticated Vosk streaming WebSocket URL for voice recognition.
+   * Browsers cannot set the Authorization header on WebSocket connections,
+   * so the JWT travels as a query parameter and is verified server-side with
+   * the exact same AuthService used by the REST API.
+   */
+  getVoiceStreamUrl(language: string, token: string): string {
+    let base = API_BASE;
+    if (base.startsWith('/')) {
+      // Relative API base (e.g. "/api/v1" behind the Next.js proxy): resolve
+      // against the page origin — WebSocket URLs must be absolute.
+      base = `${typeof window !== 'undefined' ? window.location.origin : ''}${base}`;
+    }
+    const wsBase = base.replace(/^https:\/\//, 'wss://').replace(/^http:\/\//, 'ws://');
+    const params = new URLSearchParams({ token, language });
+    return `${wsBase}/voice/stream?${params.toString()}`;
+  }
+
   getHeaders(): HeadersInit {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
@@ -457,64 +475,6 @@ class ApiClient {
       }),
     });
   }
-
-  async transcribeAudio(
-    audioBlob: Blob,
-    language?: string
-  ): Promise<{
-    transcript: string;
-    language: string;
-    detected_language: string;
-    confidence: number;
-    processing_time_ms: number;
-    success: boolean;
-  }> {
-    const formData = new FormData();
-    const extension = audioBlob.type.includes('webm')
-      ? 'webm'
-      : audioBlob.type.includes('ogg')
-      ? 'ogg'
-      : audioBlob.type.includes('mp4')
-      ? 'mp4'
-      : 'wav';
-    formData.append('audio', audioBlob, `voice-command.${extension}`);
-    if (language) formData.append('language', language.split('-')[0]);
-
-    const headers: Record<string, string> = { 'X-Organization-Id': this.orgId };
-    if (this.token) headers.Authorization = `Bearer ${this.token}`;
-
-    let res: Response;
-    try {
-      res = await fetch(`${API_BASE}/voice/transcribe`, {
-        method: 'POST',
-        headers,
-        body: formData,
-      });
-    } catch (err: any) {
-      throw new ApiError(
-        `Transcription service unreachable: ${err?.message || 'Network error'}`,
-        undefined,
-        'NETWORK_ERROR',
-        err
-      );
-    }
-
-    if (!res.ok) {
-      const detail = await res.text().catch(() => '');
-      throw new ApiError(
-        `Audio transcription failed with HTTP ${res.status}${detail ? `: ${detail}` : ''}`,
-        res.status,
-        `HTTP_${res.status}`
-      );
-    }
-
-    const result = await res.json();
-    return { ...result, language: result.detected_language };
-  }
-
-  // --------------------------------------------------------------------------
-  // Multimodal & Safety Endpoints
-  // --------------------------------------------------------------------------
 
   async processMultimodalIntent(
     payloadOrInput: MultimodalFusionPayload | MultimodalInputItem[] | MultimodalInputItem

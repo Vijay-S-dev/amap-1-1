@@ -1,0 +1,93 @@
+{
+ "load_s": 0.44,
+ "silence_freeform": [
+  [
+   "FLUSH_FINAL",
+   ""
+  ]
+ ],
+ "noise_low_freeform": [
+  [
+   "FLUSH_FINAL",
+   "huh"
+  ]
+ ],
+ "noise_high_freeform": [
+  [
+   "FLUSH_FINAL",
+   ""
+  ]
+ ],
+ "double_utterance": [
+  [
+   "PARTIAL",
+   "next"
+  ],
+  [
+   "ENDPOINT",
+   1.62
+  ],
+  [
+   "FINAL",
+   "next step"
+  ]
+ ],
+ "pause_035s_inside_utterance": [
+  [
+   "PARTIAL",
+   "next"
+  ],
+  [
+   "ENDPOINT",
+   2.096
+  ],
+  [
+   "FINAL",
+   "next step"
+  ]
+ ],
+ "pause_060s_inside_utterance": [
+  [
+   "PARTIAL",
+   "next"
+  ],
+  [
+   "ENDPOINT",
+   2.326
+  ],
+  [
+   "FINAL",
+   "next step"
+  ]
+ ],
+ "grammar_fixture": [
+  [
+   "PARTIAL",
+   "next"
+  ],
+  [
+   "ENDPOINT",
+   1.606
+  ],
+  [
+   "FINAL",
+   "next step"
+  ]
+ ],
+ "grammar_silence": [
+  [
+   "FLUSH_FINAL",
+   ""
+  ]
+ ],
+ "grammar_noise_high": [
+  [
+   "PARTIAL",
+   "this"
+  ],
+  [
+   "FLUSH_FINAL",
+   ""
+  ]
+ ]
+}

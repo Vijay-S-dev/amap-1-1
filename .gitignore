@@ -33,4 +33,4 @@ backend/.pytest_cache/
 backend/data/
 
 # Local speech-to-text model cache (prefetched at setup, never committed)
-backend/.whisper_cache/
+backend/.vosk_cache/

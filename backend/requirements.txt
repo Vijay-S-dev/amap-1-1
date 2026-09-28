@@ -28,6 +28,5 @@ tzdata==2026.3
 uvicorn==0.30.6
 watchfiles==1.2.0
 websockets==17.0.1
-faster-whisper==1.1.0
-imageio-ffmpeg>=0.5.1
+vosk==0.3.45
 python-multipart==0.0.12

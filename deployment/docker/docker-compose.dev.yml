@@ -17,10 +17,11 @@ services:
     #   DATABASE_URL=postgresql://amap_user:change_me@localhost:5432/amap \
     #     python scripts/migrate.py && python scripts/seed.py
     #
-    # Voice (/voice/transcribe) additionally needs the local faster-whisper
-    # model, which is gitignored and must be built once per machine:
-    #   python scripts/prefetch_whisper_model.py
-    # (writes backend/.whisper_cache/tiny; verified by backend voice tests)
+    # Voice (WS /voice/stream) additionally needs the local Vosk models,
+    # which are gitignored and must be provisioned once per machine:
+    #   python scripts/prefetch_vosk_models.py
+    # (writes backend/.vosk_cache; checksum-verified; verified by backend
+    # voice tests)
 
   redis:
     image: redis:7-alpine

@@ -2,7 +2,7 @@
 
 /**
  * Worker Voice Setup & Calibration Studio (/onboarding/voice-setup)
- * Local faster-whisper push-to-talk voice calibration flow.
+ * Streaming Vosk voice calibration flow (hands-free, automatic end-of-speech).
  * 
  * Invariant Guarantees:
  * 1. Push-to-talk recording with automatic silence detection.
@@ -17,14 +17,15 @@ import { useRouter } from 'next/navigation';
 import { useAccessibility } from '@/shared/theme/AccessibilityContext';
 import { t, SupportedLanguage } from '@/shared/i18n/languages';
 import { api } from '@/shared/api/client';
-import { useVoiceRecorder, TranscriptionResult, VoiceRecorderState } from '@/shared/hooks/useVoiceRecorder';
+import { useVoiceStream, VoiceFinalEvent, VoiceStreamState } from '@/shared/hooks/useVoiceStream';
 
 type MicState =
   | 'MICROPHONE_PERMISSION_REQUIRED'
   | 'MICROPHONE_REQUESTING'
   | 'MICROPHONE_READY'
   | 'MICROPHONE_DENIED'
-  | 'MICROPHONE_ERROR';
+  | 'MICROPHONE_ERROR'
+  | 'MICROPHONE_STOPPED';
 
 interface TrainingStep {
   id: string;
@@ -88,10 +89,9 @@ export default function VoiceSetupPage() {
     setTrainingSteps(TRAINING_STEPS_BY_LANG[language] || TRAINING_STEPS_BY_LANG.en);
   }, [language]);
 
-  // Handle a backend transcript with diagnostic timestamps.
+  // Handle a finalized streaming utterance with diagnostic timestamps.
   const handleRecognizedTranscript = useCallback(
-    async (result: TranscriptionResult) => {
-      const t0 = performance.now();
+    async (event: VoiceFinalEvent) => {
       const now = Date.now();
 
       // 500ms Debounce Latch
@@ -100,26 +100,22 @@ export default function VoiceSetupPage() {
       }
       lastProcessedTimeRef.current = now;
 
-      const spokenText = result.transcript.trim();
+      const spokenText = event.transcript.trim();
       setRawTranscript(spokenText);
 
       try {
-        const tApiStart = performance.now();
-        const commandResult = await api.processVoiceCommand({
-          raw_transcript: spokenText,
-          confidence: result.confidence,
-          language: result.detected_language,
-        });
-        const tApiEnd = performance.now();
-        const apiDuration = Math.round(tApiEnd - tApiStart);
-        const totalDuration = Math.round(performance.now() - t0);
+        // Streaming final: the backend already matched the command through
+        // the existing AMAP VoiceService parser (no extra HTTP round trip).
+        const commandResult = event.command;
+        const apiDuration = event.processing_time_ms ?? 0;
+        const totalDuration = Math.round(performance.now() - now);
 
         setProcessingLatencyMs(totalDuration);
         console.log(`[AMAP Voice] Spoken: "${spokenText}" | API Match: ${apiDuration}ms | Total Latency: ${totalDuration}ms`);
 
-        setConfidenceScore(commandResult.confidence);
+        setConfidenceScore(commandResult?.confidence ?? 0);
 
-        if (commandResult.validation_status === 'valid' && commandResult.action_mapping) {
+        if (commandResult && commandResult.validation_status === 'valid' && commandResult.action_mapping) {
           setMatchedCommand(commandResult.matched_command || 'NONE');
           setMatchedIntent(commandResult.action_mapping.toUpperCase());
           setFeedbackMessage(`✓ Recognized: "${spokenText}" (${commandResult.action_mapping})`);
@@ -151,7 +147,7 @@ export default function VoiceSetupPage() {
         console.error('[AMAP Voice Error] Processing error details:', {
           message: err?.message,
           spokenText,
-          language: result.detected_language,
+          language: event.detected_language,
         });
         setFeedbackMessage(`⚠️ Voice command evaluation error: ${err?.message || 'Connection error'}`);
       }
@@ -159,40 +155,54 @@ export default function VoiceSetupPage() {
     [announce, playAudioCue]
   );
 
-  const handleRecorderState = useCallback((state: VoiceRecorderState) => {
-    if (state === 'REQUESTING_MIC') setMicState('MICROPHONE_REQUESTING');
-    else if (state === 'READY') setMicState('MICROPHONE_READY');
+  const handleRecorderState = useCallback((state: VoiceStreamState) => {
+    if (state === 'REQUESTING_MIC' || state === 'CONNECTING') setMicState('MICROPHONE_REQUESTING');
+    else if (
+      state === 'READY' ||
+      state === 'LISTENING' ||
+      state === 'SPEAKING' ||
+      state === 'FINALIZING' ||
+      state === 'EXECUTING'
+    )
+      setMicState('MICROPHONE_READY');
     else if (state === 'ERROR') setMicState('MICROPHONE_ERROR');
+    else if (state === 'IDLE') setMicState('MICROPHONE_STOPPED');
   }, []);
 
-  const recorder = useVoiceRecorder({
+  const voice = useVoiceStream({
     enabled: true,
-    autoRequestMic: false,
     language: sttLanguage,
-    onTranscript: handleRecognizedTranscript,
+    onFinal: handleRecognizedTranscript,
     onError: setMicErrorMessage,
     onStateChange: handleRecorderState,
   });
 
-  const isListening = recorder.state === 'RECORDING';
-  const volumeLevel = recorder.volumeLevel;
+  const isListening =
+    voice.state === 'LISTENING' ||
+    voice.state === 'SPEAKING' ||
+    voice.state === 'READY' ||
+    voice.state === 'FINALIZING' ||
+    voice.state === 'EXECUTING';
+  const volumeLevel = voice.volumeLevel;
+  const partialText = voice.partialText;
 
   const requestMicrophoneAccess = async () => {
     try {
       setMicState('MICROPHONE_REQUESTING');
       setMicErrorMessage('');
       announce('Requesting microphone access.');
-      await recorder.requestMicrophone();
+      await voice.activate();
       setMicState('MICROPHONE_READY');
-      announce('Microphone ready. Press Speak when you are ready to say the command.');
+      announce('Microphone ready. Just speak — recognition ends automatically when you pause.');
     } catch (err) {
       setMicState('MICROPHONE_DENIED');
       setMicErrorMessage(err instanceof Error ? err.message : 'Microphone unavailable.');
     }
   };
 
-  const stopListening = () => recorder.stopRecording();
-  const restartListening = () => recorder.startRecording();
+  // Session-level toggle (mic on/off) — NOT a per-utterance stop control.
+  const stopListening = () => voice.deactivate();
+  const restartListening = () => void voice.activate();
 
   const allCompleted = trainingSteps.every((s) => s.completed);
 
@@ -353,7 +363,16 @@ export default function VoiceSetupPage() {
 
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1rem' }}>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                Status: {isListening ? '🎤 Recording — speak your command' : recorder.state === 'PROCESSING' ? '⏳ Transcribing locally' : '⏸️ Ready for push-to-talk'}
+                Status:{' '}
+                {voice.state === 'SPEAKING'
+                  ? `🗣️ “${partialText}”`
+                  : isListening
+                  ? '🎤 Listening — just speak; recognition ends automatically when you pause'
+                  : voice.state === 'REQUESTING_MIC' || voice.state === 'CONNECTING'
+                  ? '⏳ Opening microphone…'
+                  : voice.state === 'ERROR'
+                  ? '⚠️ Microphone error'
+                  : '⏸️ Microphone off'}
               </span>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 {isListening ? (
@@ -363,17 +382,16 @@ export default function VoiceSetupPage() {
                     className="btn btn-secondary"
                     style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem' }}
                   >
-                    ⏸️ Pause Listening
+                    ⏸️ Turn Microphone Off
                   </button>
                 ) : (
                   <button
                     type="button"
                     onClick={restartListening}
-                    disabled={recorder.state === 'PROCESSING'}
                     className="btn btn-primary"
                     style={{ fontSize: '0.78rem', padding: '0.35rem 0.75rem' }}
                   >
-                    🎙️ Speak
+                    🎙️ Turn Microphone On
                   </button>
                 )}
               </div>

@@ -14,15 +14,15 @@ import { MediaPipeHandTracker, CameraLifecycleState } from '@/worker/components/
 import { useAccessibility, InteractionModality } from '@/shared/theme/AccessibilityContext';
 import { t } from '@/shared/i18n/languages';
 import { api } from '@/shared/api/client';
-import { useVoiceRecorder, VoiceRecorderState, TranscriptionResult } from '@/shared/hooks/useVoiceRecorder';
+import { useVoiceStream, VoiceStreamState, VoiceFinalEvent } from '@/shared/hooks/useVoiceStream';
 import { MultimodalFusionResult, MultimodalInputItem } from '@/shared/types';
 
 export type MicLifecycleState =
   | 'MIC_IDLE'
   | 'MIC_REQUESTING_PERMISSION'
-  | 'MIC_READY'
+  | 'MIC_CONNECTING'
   | 'LISTENING'
-  | 'PROCESSING'
+  | 'SPEAKING'
   | 'MIC_ERROR'
   | 'MIC_STOPPED';
 
@@ -87,7 +87,6 @@ export function MultimodalHUD({
   const [lastExecutedAction, setLastExecutedAction] = useState<string | null>(null);
   const [lastTranscript, setLastTranscript] = useState<string>('');
   const [voiceLatencyMs, setVoiceLatencyMs] = useState<number>(0);
-  const recordingStartedAtRef = useRef<number>(0);
   const lastVoiceProcessedTimeRef = useRef<number>(0);
   const isVoiceProcessingRef = useRef<boolean>(false);
   const lastPerceivedGestureRef = useRef<{ gesture: string; confidence: number; timestamp: number } | null>(null);
@@ -306,36 +305,37 @@ export function MultimodalHUD({
     }
   };
 
-  const handleVoiceTranscript = useCallback(async (result: TranscriptionResult) => {
+  const handleVoiceFinal = useCallback(async (event: VoiceFinalEvent) => {
     // Emergency Stop Voice Lockout
     if (isEmergencyStopped) {
       return;
     }
 
     const now = Date.now();
-    // Debounce latch (~500ms) and in-flight processing guard
+    // Debounce latch (~500ms) and in-flight processing guard: one finalized
+    // utterance produces at most ONE command execution.
     if (now - lastVoiceProcessedTimeRef.current < 500 || isVoiceProcessingRef.current) {
       return;
     }
     lastVoiceProcessedTimeRef.current = now;
     isVoiceProcessingRef.current = true;
 
-    const transcript = result.transcript.trim();
+    const transcript = event.transcript.trim();
     setLastTranscript(transcript);
-    const startedAt = recordingStartedAtRef.current || performance.now();
+    const startedAt = performance.now();
     try {
-      const command = await api.processVoiceCommand({
-        raw_transcript: transcript,
-        confidence: result.confidence,
-        language: result.detected_language,
-      });
+      // The streaming endpoint already ran the existing AMAP VoiceService
+      // parser server-side (identical semantics to /voice/process-command);
+      // its result rides on the final event. No extra HTTP round trip.
+      const command = event.command;
       setVoiceLatencyMs(Math.round(performance.now() - startedAt));
 
       // Unmatched commands: give feedback to worker, do not proceed
-      if (!command.action_mapping) {
+      if (!command || !command.action_mapping) {
         setActiveVoiceCommand('standby');
-        setMicErrorMessage(command.message || 'Command not recognized. Please try again.');
-        announce(command.message || 'Voice command not recognized.');
+        const unmatchedMessage = command?.message || 'Command not recognized. Please try again.';
+        setMicErrorMessage(unmatchedMessage);
+        announce(unmatchedMessage);
         return;
       }
 
@@ -349,7 +349,7 @@ export function MultimodalHUD({
       const intentConfidence =
         typeof command.confidence === 'number' && command.confidence > 0
           ? command.confidence
-          : result.confidence;
+          : event.confidence;
       lastPerceivedVoiceRef.current = {
         action,
         command: displayCmd,
@@ -364,8 +364,8 @@ export function MultimodalHUD({
           confidence: intentConfidence,
           timestamp_ms: now,
           context_data: {
-            language: result.detected_language,
-            stt_confidence: result.confidence,
+            language: event.detected_language,
+            stt_confidence: event.confidence,
             matched_command: displayCmd,
           },
         },
@@ -435,30 +435,43 @@ export function MultimodalHUD({
     setMicErrorMessage(message);
   }, []);
 
-  const handleRecorderState = useCallback((next: VoiceRecorderState) => {
-    const stateMap: Record<VoiceRecorderState, MicLifecycleState> = {
+  const handleVoiceState = useCallback((next: VoiceStreamState) => {
+    const stateMap: Record<VoiceStreamState, MicLifecycleState> = {
       IDLE: 'MIC_STOPPED',
       REQUESTING_MIC: 'MIC_REQUESTING_PERMISSION',
-      READY: 'MIC_READY',
-      RECORDING: 'LISTENING',
-      PROCESSING: 'PROCESSING',
+      CONNECTING: 'MIC_CONNECTING',
+      LISTENING: 'LISTENING',
+      SPEAKING: 'SPEAKING',
+      FINALIZING: 'LISTENING',
+      EXECUTING: 'LISTENING',
+      READY: 'LISTENING',
       ERROR: 'MIC_ERROR',
     };
     setMicState(stateMap[next]);
-    if (next === 'READY') setMicErrorMessage('');
+    if (next === 'READY' || next === 'LISTENING') setMicErrorMessage('');
   }, []);
 
-  const recorder = useVoiceRecorder({
+  const voice = useVoiceStream({
     enabled: isVoiceActive && !isEmergencyStopped,
     language: sttLanguage,
-    onTranscript: handleVoiceTranscript,
+    onFinal: handleVoiceFinal,
     onError: handleRecorderError,
-    onStateChange: handleRecorderState,
+    onStateChange: handleVoiceState,
   });
+
+  // Hands-free streaming voice: opening the voice modality opens the
+  // microphone once; the server-side Vosk endpointer finalizes every
+  // utterance automatically. There is no stop-recording control.
+  useEffect(() => {
+    if (isVoiceActive && !isEmergencyStopped) {
+      void voice.activate();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isVoiceActive, isEmergencyStopped]);
 
   const handleRetryMic = () => {
     setMicErrorMessage('');
-    recorder.startRecording();
+    void voice.activate();
   };
 
   const handleModeSelect = (newModality: InteractionModality) => {
@@ -739,12 +752,12 @@ export function MultimodalHUD({
                 </div>
                 <div>
                   {isVoiceActive ? (
-                    micState === 'LISTENING' || micState === 'MIC_READY' ? (
+                    micState === 'LISTENING' ? (
                       <span className="badge badge-emerald">● {t('mic_status_ready', language)}</span>
-                    ) : micState === 'MIC_REQUESTING_PERMISSION' ? (
+                    ) : micState === 'SPEAKING' ? (
+                      <span className="badge badge-cyan">🗣️ {t('voice_stream_speaking', language)}</span>
+                    ) : micState === 'MIC_REQUESTING_PERMISSION' || micState === 'MIC_CONNECTING' ? (
                       <span className="badge badge-amber">⏳ {t('mic_status_requesting', language)}</span>
-                    ) : micState === 'PROCESSING' ? (
-                      <span className="badge badge-cyan">⏳ Processing</span>
                     ) : (
                       <span className="badge badge-rose">❌ {t('mic_status_error', language)}</span>
                     )
@@ -756,34 +769,54 @@ export function MultimodalHUD({
 
               {isVoiceActive && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (recorder.state === 'RECORDING') {
-                        recorder.stopRecording();
-                      } else {
-                        recordingStartedAtRef.current = performance.now();
-                        recorder.startRecording();
-                      }
+                  {/* Hands-free streaming: live partial caption (display-only
+                      feedback; partials NEVER execute commands). */}
+                  <div
+                    role="status"
+                    aria-live="polite"
+                    aria-label={t('voice_stream_listening', language)}
+                    style={{
+                      minHeight: '52px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                      padding: '0.5rem 0.85rem',
+                      borderRadius: '14px',
+                      fontWeight: 700,
+                      fontSize: '0.95rem',
+                      background:
+                        voice.state === 'SPEAKING' ? 'rgba(16, 185, 129, 0.12)' : 'rgba(255, 255, 255, 0.03)',
+                      border: `1px solid ${voice.state === 'SPEAKING' ? 'var(--org-emerald)' : 'var(--surface-glass-border)'}`,
+                      color: voice.state === 'SPEAKING' ? 'var(--org-emerald)' : 'var(--text-secondary)',
+                      textAlign: 'center',
                     }}
-                    disabled={isEmergencyStopped || recorder.state === 'PROCESSING' || micState === 'MIC_REQUESTING_PERMISSION'}
-                    className={`btn ${recorder.state === 'RECORDING' ? 'btn-danger' : 'btn-primary'}`}
-                    style={{ minHeight: '52px', fontWeight: 800, fontSize: '1rem' }}
+                  >
+                    {isEmergencyStopped ? (
+                      '🛑 Microphone locked during emergency stop'
+                    ) : voice.state === 'SPEAKING' ? (
+                      <span>
+                        🗣️ <strong>“{voice.partialText}”</strong>
+                      </span>
+                    ) : voice.state === 'REQUESTING_MIC' || voice.state === 'CONNECTING' ? (
+                      `🎙️ ${t('mic_status_requesting', language)}`
+                    ) : voice.state === 'ERROR' ? (
+                      `⚠️ ${t('mic_status_error', language)}`
+                    ) : (
+                      `🎙️ ${t('voice_stream_listening', language)}`
+                    )}
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '0.75rem',
+                      color: isEmergencyStopped ? 'var(--accent-rose)' : 'var(--text-muted)',
+                      textAlign: 'center',
+                      fontWeight: isEmergencyStopped ? 700 : 400,
+                    }}
                   >
                     {isEmergencyStopped
-                      ? '🛑 Mic Locked'
-                      : recorder.state === 'RECORDING'
-                      ? '⏹️ Stop Recording'
-                      : recorder.state === 'PROCESSING'
-                      ? '⏳ Transcribing…'
-                      : '🎙️ Speak'}
-                  </button>
-                  <span style={{ fontSize: '0.75rem', color: isEmergencyStopped ? 'var(--accent-rose)' : 'var(--text-muted)', textAlign: 'center', fontWeight: isEmergencyStopped ? 700 : 400 }}>
-                    {isEmergencyStopped
                       ? 'Microphone locked during emergency stop. Clear lockout to resume.'
-                      : recorder.state === 'RECORDING'
-                      ? 'Click to stop immediately, or pause speech for 1.5s'
-                      : 'Push to talk — click to speak, click again to stop'}
+                      : t('voice_stream_hint', language)}
                   </span>
                   {lastTranscript && (
                     <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>

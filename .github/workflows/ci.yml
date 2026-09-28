@@ -4,7 +4,7 @@
 #   1. migrations 001..051 on a fresh PostgreSQL 16
 #   2. seed
 #   3. complete backend test suite (zero failures / zero collection
-#      errors / zero skips — the Whisper model is prefetched so the
+#      errors / zero skips — the Vosk models are prefetched so the
 #      real STT tests execute)
 #   4. frontend: npm ci + typecheck + production build
 #   5. critical end-to-end over real HTTP + PostgreSQL assertions
@@ -48,11 +48,11 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
-      - name: Cache Whisper model (real STT tests must not skip)
+      - name: Cache Vosk models (real STT tests must not skip)
         uses: actions/cache@v4
         with:
-          path: backend/.whisper_cache
-          key: whisper-tiny-v1-${{ hashFiles('scripts/prefetch_whisper_model.py') }}
+          path: backend/.vosk_cache
+          key: vosk-small-v1-${{ hashFiles('scripts/prefetch_vosk_models.py') }}
 
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
@@ -63,8 +63,8 @@ jobs:
       - name: Seed
         run: python scripts/seed.py
 
-      - name: Prefetch local Whisper model (EN + HI)
-        run: python scripts/prefetch_whisper_model.py
+      - name: Prefetch local Vosk models (EN + HI)
+        run: python scripts/prefetch_vosk_models.py
 
       - name: Backend test suite
         working-directory: backend
@@ -123,8 +123,8 @@ jobs:
           python-version: '3.11'
           cache: pip
 
-      - name: Prefetch local Whisper model
-        run: python scripts/prefetch_whisper_model.py
+      - name: Prefetch local Vosk models
+        run: python scripts/prefetch_vosk_models.py
 
       - name: docker compose build
         run: |

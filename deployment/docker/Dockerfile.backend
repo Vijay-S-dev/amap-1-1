@@ -11,10 +11,26 @@ WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Stage 2: Vosk speech-recognition models (deterministic, checksum-verified).
+# scripts/prefetch_vosk_models.py installs exactly:
+#   vosk-model-small-en-us-0.15 (sha256 30f26242...80942498, ~68 MB unpacked)
+#   vosk-model-small-hi-0.22    (sha256 7c50a108...9f0017e48, ~79 MB unpacked)
+# and verifies every byte before installation. This happens at IMAGE BUILD
+# time (layer-cached); containers never download models at startup.
+FROM python:3.11-slim AS vosk-models
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /work
+COPY scripts/prefetch_vosk_models.py /work/scripts/prefetch_vosk_models.py
+RUN python /work/scripts/prefetch_vosk_models.py --dir /models
 
 # Stage 2: Runtime Image
 FROM python:3.11-slim AS runtime
@@ -33,6 +49,10 @@ COPY --from=builder /root/.local /home/amapuser/.local
 # Copy backend & AI application code
 COPY --chown=amapuser:amapuser backend /app/backend
 COPY --chown=amapuser:amapuser ai /app/ai
+
+# Vosk models (built + checksum-verified in the vosk-models stage). Loaded
+# once at startup from /app/backend/.vosk_cache — no runtime downloads.
+COPY --from=vosk-models --chown=amapuser:amapuser /models /app/backend/.vosk_cache
 
 # Migration runner + seed + migration/seed SQL (used by the migrate service)
 COPY --chown=amapuser:amapuser scripts /app/scripts

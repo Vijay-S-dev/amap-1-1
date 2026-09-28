@@ -1,0 +1,705 @@
+{
+ "vosk": {
+  "en_load_s": 0.35,
+  "en_rss_after_load_mb": 202.0,
+  "hi_load_s": 0.46,
+  "both_models_rss_mb": 350.0,
+  "en_next_step": {
+   "freeform": {
+    "first_partial_at": 0.7364553580000006,
+    "partials": [
+     "next",
+     "next step"
+    ],
+    "endpoint_at": 1.8460730439999793,
+    "final": "next step",
+    "word_end": 0.99,
+    "conf": 1.0,
+    "endpoint_latency_after_speech_end_s": 0.856,
+    "dur_s": 1.03,
+    "wall_s": 1.898,
+    "cpu_s": 0.52,
+    "cpu_util_pct_of_core": 27.4,
+    "rss_delta_mb": 15.0
+   },
+   "grammar": {
+    "first_partial_at": 0.40864716100003307,
+    "partials": [
+     "next",
+     "next step"
+    ],
+    "endpoint_at": 1.8458931659999962,
+    "final": "next step",
+    "word_end": null,
+    "conf": null,
+    "wall_s": 1.852,
+    "cpu_s": 0.06,
+    "cpu_util_pct_of_core": 3.2,
+    "rss_delta_mb": 0.0
+   }
+  },
+  "en_go_back": {
+   "freeform": {
+    "first_partial_at": 0.8011933779999936,
+    "partials": [
+     "go",
+     "go back"
+    ],
+    "endpoint_at": 1.8460556960000076,
+    "final": "go back",
+    "word_end": 0.72,
+    "conf": 1.0,
+    "endpoint_latency_after_speech_end_s": 1.126,
+    "dur_s": 0.79,
+    "wall_s": 1.862,
+    "cpu_s": 0.48,
+    "cpu_util_pct_of_core": 25.8,
+    "rss_delta_mb": 3.5
+   },
+   "grammar": {
+    "first_partial_at": 0.4091283050000243,
+    "partials": [
+     "go",
+     "go back"
+    ],
+    "endpoint_at": 1.604677607000042,
+    "final": "go back",
+    "word_end": null,
+    "conf": null,
+    "wall_s": 1.61,
+    "cpu_s": 0.05,
+    "cpu_util_pct_of_core": 3.1,
+    "rss_delta_mb": 0.0
+   }
+  },
+  "en_emergency_stop": {
+   "freeform": {
+    "first_partial_at": 0.675191127000005,
+    "partials": [
+     "emergency",
+     "emergency services",
+     "emergency stop"
+    ],
+    "endpoint_at": 2.086439499999983,
+    "final": "emergency stop",
+    "word_end": 1.05,
+    "conf": 1.0,
+    "endpoint_latency_after_speech_end_s": 1.036,
+    "dur_s": 1.11,
+    "wall_s": 2.095,
+    "cpu_s": 0.56,
+    "cpu_util_pct_of_core": 26.7,
+    "rss_delta_mb": 1.6
+   },
+   "grammar": {
+    "first_partial_at": 0.40940020099998264,
+    "partials": [
+     "emergency",
+     "emergency stop"
+    ],
+    "endpoint_at": 1.8472225219999814,
+    "final": "emergency stop",
+    "word_end": null,
+    "conf": null,
+    "wall_s": 1.854,
+    "cpu_s": 0.07,
+    "cpu_util_pct_of_core": 3.8,
+    "rss_delta_mb": 0.0
+   }
+  },
+  "en_show_failed": {
+   "freeform": {
+    "first_partial_at": 0.7422385230000259,
+    "partials": [
+     "show",
+     "show failed",
+     "show failed in",
+     "show failed",
+     "show failed inspection",
+     "show failed inspection records"
+    ],
+    "endpoint_at": 2.567261094999992,
+    "final": "show failed inspection records",
+    "word_end": 1.83,
+    "conf": 1.0,
+    "endpoint_latency_after_speech_end_s": 0.737,
+    "dur_s": 1.91,
+    "wall_s": 2.598,
+    "cpu_s": 0.69,
+    "cpu_util_pct_of_core": 26.6,
+    "rss_delta_mb": 2.2
+   },
+   "grammar": {
+    "first_partial_at": 0.4099236470000278,
+    "partials": [
+     "shut",
+     "go",
+     "go finish",
+     "go finish done",
+     "go finish step action",
+     "go finish step action resume",
+     "go finish step action reject"
+    ],
+    "endpoint_at": 2.565037007000001,
+    "final": "go finish done step action reject",
+    "word_end": null,
+    "conf": null,
+    "wall_s": 2.571,
+    "cpu_s": 0.09,
+    "cpu_util_pct_of_core": 3.5,
+    "rss_delta_mb": 0.0
+   }
+  },
+  "en_submit_result": {
+   "freeform": {
+    "first_partial_at": 0.9209743000000117,
+    "partials": [
+     "submit resumes",
+     "submit",
+     "submit result"
+    ],
+    "endpoint_at": 2.086172863999991,
+    "final": "submit result",
+    "word_end": 1.11,
+    "conf": 1.0,
+    "endpoint_latency_after_speech_end_s": 0.976,
+    "dur_s": 1.27,
+    "wall_s": 2.133,
+    "cpu_s": 0.56,
+    "cpu_util_pct_of_core": 26.3,
+    "rss_delta_mb": 0.3
+   },
+   "grammar": {
+    "first_partial_at": 0.4106612339999174,
+    "partials": [
+     "select",
+     "double",
+     "session it resume",
+     "session it resume halt"
+    ],
+    "endpoint_at": 1.8468809759999658,
+    "final": "session it resume halt",
+    "word_end": null,
+    "conf": null,
+    "wall_s": 1.856,
+    "cpu_s": 0.07,
+    "cpu_util_pct_of_core": 3.8,
+    "rss_delta_mb": 0.0
+   }
+  },
+  "en_open_production": {
+   "freeform": {
+    "first_partial_at": 0.7522338119999858,
+    "partials": [
+     "open",
+     "open production",
+     "open production quality"
+    ],
+    "endpoint_at": 2.565517100999955,
+    "final": "open production quality",
+    "word_end": 1.59,
+    "conf": 1.0,
+    "endpoint_latency_after_speech_end_s": 0.976,
+    "dur_s": 1.67,
+    "wall_s": 2.595,
+    "cpu_s": 0.69,
+    "cpu_util_pct_of_core": 26.6,
+    "rss_delta_mb": 0.0
+   },
+   "grammar": {
+    "first_partial_at": 0.6463791259999425,
+    "partials": [
+     "okay",
+     "okay proceed",
+     "up approve action",
+     "up approve action call",
+     "up approve action call it",
+     "up approve action call okay"
+    ],
+    "endpoint_at": 2.3248115869999992,
+    "final": "up approve action call okay",
+    "word_end": null,
+    "conf": null,
+    "wall_s": 2.33,
+    "cpu_s": 0.08,
+    "cpu_util_pct_of_core": 3.4,
+    "rss_delta_mb": 0.0
+   }
+  },
+  "hi_agla_kadam": {
+   "freeform": {
+    "first_partial_at": 0.6846024619999298,
+    "partials": [
+     "अगला",
+     "अगला कदम"
+    ],
+    "endpoint_at": 2.0890718590000006,
+    "final": "अगला कदम",
+    "word_end": 0.78,
+    "conf": 0.97,
+    "endpoint_latency_after_speech_end_s": 1.309,
+    "dur_s": 0.98,
+    "wall_s": 2.095,
+    "cpu_s": 0.32,
+    "cpu_util_pct_of_core": 15.3,
+    "rss_delta_mb": 0.0
+   },
+   "grammar": {
+    "first_partial_at": null,
+    "partials": [],
+    "endpoint_at": null,
+    "final": "",
+    "word_end": null,
+    "conf": null,
+    "wall_s": 2.483,
+    "cpu_s": 0.06,
+    "cpu_util_pct_of_core": 2.4,
+    "rss_delta_mb": 0.0
+   }
+  },
+  "hi_madad": {
+   "freeform": {
+    "first_partial_at": 0.7091070559999935,
+    "partials": [
+     "मुझे",
+     "मुझे मदद",
+     "मुझे मदद चाहिए"
+    ],
+    "endpoint_at": 2.089354520000029,
+    "final": "मुझे मदद चाहिए",
+    "word_end": 1.2,
+    "conf": 1.0,
+    "endpoint_latency_after_speech_end_s": 0.889,
+    "dur_s": 1.36,
+    "wall_s": 2.096,
+    "cpu_s": 0.33,
+    "cpu_util_pct_of_core": 15.7,
+    "rss_delta_mb": 0.3
+   },
+   "grammar": {
+    "first_partial_at": null,
+    "partials": [],
+    "endpoint_at": null,
+    "final": "",
+    "word_end": null,
+    "conf": null,
+    "wall_s": 2.863,
+    "cpu_s": 0.08,
+    "cpu_util_pct_of_core": 2.8,
+    "rss_delta_mb": 0.0
+   }
+  },
+  "hi_roko": {
+   "freeform": {
+    "first_partial_at": 0.9464344430000438,
+    "partials": [
+     "रोको"
+    ],
+    "endpoint_at": 1.850762777,
+    "final": "रोको",
+    "word_end": 0.6,
+    "conf": 0.633,
+    "endpoint_latency_after_speech_end_s": 1.251,
+    "dur_s": 0.8,
+    "wall_s": 1.89,
+    "cpu_s": 0.42,
+    "cpu_util_pct_of_core": 22.2,
+    "rss_delta_mb": 2.2
+   },
+   "grammar": {
+    "first_partial_at": null,
+    "partials": [],
+    "endpoint_at": null,
+    "final": "",
+    "word_end": null,
+    "conf": null,
+    "wall_s": 2.311,
+    "cpu_s": 0.06,
+    "cpu_util_pct_of_core": 2.6,
+    "rss_delta_mb": 0.0
+   }
+  },
+  "hi_radd_karein": {
+   "freeform": {
+    "first_partial_at": 0.6944588509999221,
+    "partials": [
+     "रद्द",
+     "रद्द करें"
+    ],
+    "endpoint_at": 1.6076392079999096,
+    "final": "रद्द करें",
+    "word_end": 0.87,
+    "conf": 0.99,
+    "endpoint_latency_after_speech_end_s": 0.738,
+    "dur_s": 1.06,
+    "wall_s": 1.616,
+    "cpu_s": 0.4,
+    "cpu_util_pct_of_core": 24.8,
+    "rss_delta_mb": 1.6
+   },
+   "grammar": {
+    "first_partial_at": null,
+    "partials": [],
+    "endpoint_at": null,
+    "final": "",
+    "word_end": null,
+    "conf": null,
+    "wall_s": 2.565,
+    "cpu_s": 0.07,
+    "cpu_util_pct_of_core": 2.7,
+    "rss_delta_mb": 0.0
+   }
+  }
+ },
+ "whisper": {
+  "cold_first_transcribe_s": 0.95,
+  "rss_after_model_mb": 592.0,
+  "en_next_step": {
+   "transcript": "Next step.",
+   "detected_language": "en",
+   "confidence": 0.5487146958339234,
+   "backend_processing_time_ms": 556.25,
+   "measured_wall_s": 0.556,
+   "cpu_s": 0.71,
+   "cpu_util_pct_of_core": 127.6,
+   "rss_delta_mb": 0.3
+  },
+  "en_go_back": {
+   "transcript": "Go back.",
+   "detected_language": "en",
+   "confidence": 0.46871724217552746,
+   "backend_processing_time_ms": 566.39,
+   "measured_wall_s": 0.566,
+   "cpu_s": 0.72,
+   "cpu_util_pct_of_core": 127.1,
+   "rss_delta_mb": -0.1
+  },
+  "en_emergency_stop": {
+   "transcript": "emergency stop.",
+   "detected_language": "en",
+   "confidence": 0.5120424520634941,
+   "backend_processing_time_ms": 590.89,
+   "measured_wall_s": 0.591,
+   "cpu_s": 0.76,
+   "cpu_util_pct_of_core": 128.6,
+   "rss_delta_mb": -0.1
+  },
+  "en_show_failed": {
+   "transcript": "Showfailed inspection records.",
+   "detected_language": "en",
+   "confidence": 0.5548402255902616,
+   "backend_processing_time_ms": 603.1,
+   "measured_wall_s": 0.603,
+   "cpu_s": 0.76,
+   "cpu_util_pct_of_core": 126.0,
+   "rss_delta_mb": 0.4
+  },
+  "en_submit_result": {
+   "transcript": "Submit Result.",
+   "detected_language": "en",
+   "confidence": 0.553885827172569,
+   "backend_processing_time_ms": 606.22,
+   "measured_wall_s": 0.606,
+   "cpu_s": 0.77,
+   "cpu_util_pct_of_core": 127.0,
+   "rss_delta_mb": 2.1
+  },
+  "en_open_production": {
+   "transcript": "Open Production Quality.",
+   "detected_language": "en",
+   "confidence": 0.5308507605360888,
+   "backend_processing_time_ms": 583.77,
+   "measured_wall_s": 0.584,
+   "cpu_s": 0.72,
+   "cpu_util_pct_of_core": 123.3,
+   "rss_delta_mb": -2.3
+  },
+  "hi_agla_kadam": {
+   "transcript": "Agla Kadam.",
+   "detected_language": "hi",
+   "confidence": 0.4540642513377129,
+   "backend_processing_time_ms": 594.53,
+   "measured_wall_s": 0.595,
+   "cpu_s": 0.74,
+   "cpu_util_pct_of_core": 124.4,
+   "rss_delta_mb": -0.1
+  },
+  "hi_madad": {
+   "transcript": "Mooji Madhacharya.",
+   "detected_language": "hi",
+   "confidence": 0.2820362618094303,
+   "backend_processing_time_ms": 3056.54,
+   "measured_wall_s": 3.057,
+   "cpu_s": 3.22,
+   "cpu_util_pct_of_core": 105.3,
+   "rss_delta_mb": 23.3
+  },
+  "hi_roko": {
+   "transcript": "Roku.",
+   "detected_language": "hi",
+   "confidence": 0.4895700820753391,
+   "backend_processing_time_ms": 527.31,
+   "measured_wall_s": 0.527,
+   "cpu_s": 0.68,
+   "cpu_util_pct_of_core": 128.9,
+   "rss_delta_mb": 0.0
+  },
+  "hi_radd_karein": {
+   "transcript": "Radhukari.",
+   "detected_language": "hi",
+   "confidence": 0.32989785368940294,
+   "backend_processing_time_ms": 1802.06,
+   "measured_wall_s": 1.802,
+   "cpu_s": 1.96,
+   "cpu_util_pct_of_core": 108.8,
+   "rss_delta_mb": 1.0
+  }
+ },
+ "continuous": {
+  "utterances": [
+   {
+    "at_s": 2.591,
+    "final": "show failed inspection records",
+    "gap_since_prev_endpoint": null
+   },
+   {
+    "at_s": 6.103,
+    "final": "next step",
+    "gap_since_prev_endpoint": 3.512
+   }
+  ],
+  "stream_len_s": 8.84
+ },
+ "parse": {
+  "en_next_step": {
+   "vosk_freeform": {
+    "text": "next step",
+    "matched": "next_step",
+    "action": "next_step",
+    "score": 1.0,
+    "safety_critical": false
+   },
+   "vosk_grammar": {
+    "text": "next step",
+    "matched": "next_step",
+    "action": "next_step",
+    "score": 1.0,
+    "safety_critical": false
+   },
+   "whisper": {
+    "text": "Next step.",
+    "matched": "next_step",
+    "action": "next_step",
+    "score": 1.0,
+    "safety_critical": false
+   }
+  },
+  "en_go_back": {
+   "vosk_freeform": {
+    "text": "go back",
+    "matched": "previous_step",
+    "action": "previous_step",
+    "score": 1.0,
+    "safety_critical": false
+   },
+   "vosk_grammar": {
+    "text": "go back",
+    "matched": "previous_step",
+    "action": "previous_step",
+    "score": 1.0,
+    "safety_critical": false
+   },
+   "whisper": {
+    "text": "Go back.",
+    "matched": "previous_step",
+    "action": "previous_step",
+    "score": 1.0,
+    "safety_critical": false
+   }
+  },
+  "en_emergency_stop": {
+   "vosk_freeform": {
+    "text": "emergency stop",
+    "matched": "emergency_stop",
+    "action": "emergency_stop",
+    "score": 1.0,
+    "safety_critical": true
+   },
+   "vosk_grammar": {
+    "text": "emergency stop",
+    "matched": "emergency_stop",
+    "action": "emergency_stop",
+    "score": 1.0,
+    "safety_critical": true
+   },
+   "whisper": {
+    "text": "emergency stop.",
+    "matched": "emergency_stop",
+    "action": "emergency_stop",
+    "score": 1.0,
+    "safety_critical": true
+   }
+  },
+  "en_show_failed": {
+   "vosk_freeform": {
+    "text": "show failed inspection records",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   },
+   "vosk_grammar": {
+    "text": "go finish done step action reject",
+    "matched": "cancel_action",
+    "action": "cancel_action",
+    "score": 0.92,
+    "safety_critical": true
+   },
+   "whisper": {
+    "text": "Showfailed inspection records.",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   }
+  },
+  "en_submit_result": {
+   "vosk_freeform": {
+    "text": "submit result",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   },
+   "vosk_grammar": {
+    "text": "session it resume halt",
+    "matched": "resume_session",
+    "action": "resume_session",
+    "score": 0.92,
+    "safety_critical": false
+   },
+   "whisper": {
+    "text": "Submit Result.",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   }
+  },
+  "en_open_production": {
+   "vosk_freeform": {
+    "text": "open production quality",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   },
+   "vosk_grammar": {
+    "text": "up approve action call okay",
+    "matched": "confirm_action",
+    "action": "confirm_action",
+    "score": 0.92,
+    "safety_critical": false
+   },
+   "whisper": {
+    "text": "Open Production Quality.",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   }
+  },
+  "hi_agla_kadam": {
+   "vosk_freeform": {
+    "text": "अगला कदम",
+    "matched": "next_step",
+    "action": "next_step",
+    "score": 1.0,
+    "safety_critical": false
+   },
+   "vosk_grammar": {
+    "text": "",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   },
+   "whisper": {
+    "text": "Agla Kadam.",
+    "matched": "next_step",
+    "action": "next_step",
+    "score": 1.0,
+    "safety_critical": false
+   }
+  },
+  "hi_madad": {
+   "vosk_freeform": {
+    "text": "मुझे मदद चाहिए",
+    "matched": "request_assistance",
+    "action": "request_assistance",
+    "score": 0.92,
+    "safety_critical": false
+   },
+   "vosk_grammar": {
+    "text": "",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   },
+   "whisper": {
+    "text": "Mooji Madhacharya.",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   }
+  },
+  "hi_roko": {
+   "vosk_freeform": {
+    "text": "रोको",
+    "matched": "emergency_stop",
+    "action": "emergency_stop",
+    "score": 0.75,
+    "safety_critical": true
+   },
+   "vosk_grammar": {
+    "text": "",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   },
+   "whisper": {
+    "text": "Roku.",
+    "matched": "emergency_stop",
+    "action": "emergency_stop",
+    "score": 0.75,
+    "safety_critical": true
+   }
+  },
+  "hi_radd_karein": {
+   "vosk_freeform": {
+    "text": "रद्द करें",
+    "matched": "cancel_action",
+    "action": "cancel_action",
+    "score": 1.0,
+    "safety_critical": true
+   },
+   "vosk_grammar": {
+    "text": "",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   },
+   "whisper": {
+    "text": "Radhukari.",
+    "matched": null,
+    "action": null,
+    "score": 0.0,
+    "safety_critical": false
+   }
+  }
+ }
+}

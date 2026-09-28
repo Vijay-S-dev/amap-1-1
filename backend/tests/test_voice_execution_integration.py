@@ -13,10 +13,8 @@ from fastapi.testclient import TestClient
 from app.dependencies import get_current_active_worker, get_current_user
 from app.main import app
 from models.auth import AuthenticatedUserContext
-from models.voice import TranscriptionResult
 from routes.actions import get_action_execution_service, get_execution_events_repo
 from routes.tasks import get_task_service
-from routes.voice import get_speech_to_text_service
 from services.action_execution_service import ActionExecutionService
 
 
@@ -40,30 +38,25 @@ def mock_worker():
 def test_voice_end_to_end_authorized_action_and_persistence(mock_worker):
     """
     TASK 8-J PROOF:
-    1. Authenticated worker posts voice recording -> /voice/transcribe (mocking only Whisper inference).
-    2. Transcript forwarded to /voice/process-command -> yields canonical candidate 'next_step'.
-    3. Candidate dispatched to /actions/execute -> passes backend safety gate & logs execution event.
-    4. Workflow step execution is recorded -> persists completed status.
+    1. A finalized streaming transcript (recognition boundary — real Vosk
+       coverage lives in tests/test_vosk_streaming.py and
+       tests/test_phase11_voice_e2e.py) is forwarded to /voice/process-command
+       -> yields canonical candidate 'next_step'.
+    2. Candidate dispatched to /actions/execute -> passes backend safety gate & logs execution event.
+    3. Workflow step execution is recorded -> persists completed status.
     """
     client = TestClient(app)
     app.dependency_overrides[get_current_user] = lambda: mock_worker
     app.dependency_overrides[get_current_active_worker] = lambda: mock_worker
 
-    # 1. Mock STT inference boundary only
-    class MockWhisperSTT:
-        def validate_language(self, lang):
-            return "en"
-
-        def transcribe(self, audio_bytes, language=None, filename=None):
-            return TranscriptionResult(
-                transcript="next step",
-                detected_language="en",
-                confidence=0.95,
-                processing_time_ms=85.0,
-                success=True,
-            )
-
-    app.dependency_overrides[get_speech_to_text_service] = lambda: MockWhisperSTT()
+    # Recognition boundary: finalized transcript as delivered by the
+    # /voice/stream WebSocket (Vosk final event).
+    stt_data = {
+        "transcript": "next step",
+        "detected_language": "en",
+        "confidence": 0.95,
+        "success": True,
+    }
 
     # Track execution events and task step persistence without mocking away the business logic
     mock_events_repo = type("MockEventsRepo", (), {
@@ -117,15 +110,7 @@ def test_voice_end_to_end_authorized_action_and_persistence(mock_worker):
     app.dependency_overrides[get_task_service] = lambda: mock_task_service
 
     try:
-        # Step A: POST /voice/transcribe
-        stt_resp = client.post(
-            "/api/v1/voice/transcribe",
-            data={"language": "en"},
-            files={"audio": ("speech.webm", b"RIFF-fake-audio-payload" * 10, "audio/webm")},
-        )
-        assert stt_resp.status_code == 200
-        stt_data = stt_resp.json()
-        assert stt_data["success"] is True
+        # Step A: finalized transcript (from /voice/stream final event)
         raw_transcript = stt_data["transcript"]
         assert raw_transcript == "next step"
 

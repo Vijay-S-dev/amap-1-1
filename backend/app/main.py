@@ -53,6 +53,27 @@ def create_app() -> FastAPI:
 
     app.include_router(api_v1_router, prefix=settings.api_version_prefix)
 
+    @app.on_event("startup")
+    async def preload_vosk_models() -> None:
+        """Preload the Vosk speech-recognition models once at startup.
+
+        Runs in a daemon thread so app startup (and imports in tests that do
+        not exercise voice) are never blocked. /voice/stream connections and
+        /voice/stt-health reflect the resulting state; a missing model is a
+        reportable error, never a crash.
+        """
+        import threading
+
+        from services.vosk_stt_service import get_vosk_registry
+
+        def _preload() -> None:
+            try:
+                get_vosk_registry().preload()
+            except Exception as exc:  # noqa: BLE001 - surfaced via stt-health
+                logger.error("Vosk model preload failed: %s", exc)
+
+        threading.Thread(target=_preload, name="vosk-preload", daemon=True).start()
+
     logger.info(f"{settings.app_name} starting in '{settings.environment}' mode")
 
     return app

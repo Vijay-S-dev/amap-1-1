@@ -1,0 +1,192 @@
+{
+ "default_0.5": {
+  "en_next_step": {
+   "endpoint_at": 1.848,
+   "final": "next step",
+   "word_end": 0.99,
+   "partials": [
+    "next",
+    "next step"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.858
+  },
+  "en_go_back": {
+   "endpoint_at": 1.846,
+   "final": "go back",
+   "word_end": 0.72,
+   "partials": [
+    "go",
+    "go back"
+   ],
+   "endpoint_latency_after_speech_end_s": 1.126
+  },
+  "en_emergency_stop": {
+   "endpoint_at": 2.086,
+   "final": "emergency stop",
+   "word_end": 1.05,
+   "partials": [
+    "emergency",
+    "emergency services",
+    "emergency stop"
+   ],
+   "endpoint_latency_after_speech_end_s": 1.036
+  },
+  "en_show_failed": {
+   "endpoint_at": 2.566,
+   "final": "show failed inspection records",
+   "word_end": 1.83,
+   "partials": [
+    "show",
+    "show failed",
+    "show failed in",
+    "show failed",
+    "show failed inspection",
+    "show failed inspection records"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.736
+  },
+  "en_submit_result": {
+   "endpoint_at": 2.086,
+   "final": "submit result",
+   "word_end": 1.11,
+   "partials": [
+    "submit resumes",
+    "submit",
+    "submit result"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.976
+  },
+  "en_open_production": {
+   "endpoint_at": 2.566,
+   "final": "open production quality",
+   "word_end": 1.59,
+   "partials": [
+    "open",
+    "open production",
+    "open production quality"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.976
+  },
+  "pause_0.35s_inside": {
+   "endpoint_at": 2.086,
+   "final": "next step",
+   "word_end": 1.32,
+   "partials": [
+    "next",
+    "next step"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.766
+  },
+  "pause_0.5s_inside": {
+   "endpoint_at": 2.325,
+   "final": "next step",
+   "word_end": 1.47,
+   "partials": [
+    "next",
+    "next step"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.855
+  },
+  "loud_noise_3s": {
+   "endpoint_at": null,
+   "final": "",
+   "word_end": null,
+   "partials": []
+  }
+ },
+ "tuned_0.35": {
+  "en_next_step": {
+   "endpoint_at": 1.607,
+   "final": "next step",
+   "word_end": 0.99,
+   "partials": [
+    "next",
+    "next step"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.617
+  },
+  "en_go_back": {
+   "endpoint_at": 1.847,
+   "final": "go back",
+   "word_end": 0.72,
+   "partials": [
+    "go",
+    "go back"
+   ],
+   "endpoint_latency_after_speech_end_s": 1.127
+  },
+  "en_emergency_stop": {
+   "endpoint_at": 2.086,
+   "final": "emergency stop",
+   "word_end": 1.05,
+   "partials": [
+    "emergency",
+    "emergency services",
+    "emergency stop"
+   ],
+   "endpoint_latency_after_speech_end_s": 1.036
+  },
+  "en_show_failed": {
+   "endpoint_at": 2.565,
+   "final": "show failed inspection records",
+   "word_end": 1.83,
+   "partials": [
+    "show",
+    "show failed",
+    "show failed in",
+    "show failed",
+    "show failed inspection",
+    "show failed inspection records"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.735
+  },
+  "en_submit_result": {
+   "endpoint_at": 2.088,
+   "final": "submit result",
+   "word_end": 1.11,
+   "partials": [
+    "submit resumes",
+    "submit",
+    "submit result"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.978
+  },
+  "en_open_production": {
+   "endpoint_at": 2.567,
+   "final": "open production quality",
+   "word_end": 1.59,
+   "partials": [
+    "open",
+    "open production",
+    "open production quality"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.977
+  },
+  "pause_0.35s_inside": {
+   "endpoint_at": 1.867,
+   "final": "next step",
+   "word_end": 1.32,
+   "partials": [
+    "next",
+    "next step"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.547
+  },
+  "pause_0.5s_inside": {
+   "endpoint_at": 2.09,
+   "final": "next step",
+   "word_end": 1.47,
+   "partials": [
+    "next",
+    "next step"
+   ],
+   "endpoint_latency_after_speech_end_s": 0.62
+  },
+  "loud_noise_3s": {
+   "endpoint_at": null,
+   "final": "",
+   "word_end": null,
+   "partials": []
+  }
+ }
+}

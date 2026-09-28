@@ -68,7 +68,7 @@ class VoiceCommandResult(AMAPBaseModel):
 
 
 class TranscriptionResult(AMAPBaseModel):
-    """Result returned by the local faster-whisper transcription service."""
+    """Result of a finalized streaming utterance (Vosk)."""
 
     transcript: str = Field(default="", max_length=2000)
     detected_language: str = Field(default="en", max_length=5)
