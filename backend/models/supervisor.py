@@ -48,7 +48,9 @@ class SupervisorWorkerItem(AMAPBaseModel):
     session_duration_seconds: int = 0
     has_open_assistance: bool = False
     is_emergency_stop: bool = False
+    is_online: bool = Field(False, description="Worker workstation heartbeat is fresh")
     last_activity_at: Optional[datetime] = None
+    last_action_description: Optional[str] = Field(None, description="Most recent executed action name/type")
 
 
 class SupervisorWorkerDetail(SupervisorWorkerItem):

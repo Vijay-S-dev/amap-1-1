@@ -104,6 +104,7 @@ export default function GestureCalibrationPage() {
           <MediaPipeHandTracker
             height="360px"
             requiredDwellMs={calibratedDwellTime}
+            dwellGestures={['THUMBS_UP', 'POINTING', 'OPEN_PALM']}
             onGestureDetected={(g, conf) => setRecognizedGesture(g !== 'NONE' && g !== 'UNKNOWN' ? g : null)}
             onHandPresenceChange={(present) => {
               setHasHand(present);

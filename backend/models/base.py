@@ -43,6 +43,7 @@ class ActionCategory(str, Enum):
     TASK = "task"
     ASSISTANCE = "assistance"
     SYSTEM = "system"
+    UI_INTERACTION = "ui_interaction"
 
 
 class AssistanceStatus(str, Enum):

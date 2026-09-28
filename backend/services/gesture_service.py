@@ -23,16 +23,25 @@ from models.gesture import (
 from repositories.custom_gestures import CustomGesturesRepository
 
 
-# Standard Mapping from detected gestures to AMAP candidate actions
+# Standard Mapping from detected gestures to AMAP candidate actions.
+# Extended for the real-time interaction engine (computer/UI interaction).
+# Workers can override any of these per-gesture mappings through
+# worker_personalizations.personalization_data.gesture_action_map —
+# see services/worker_interaction_service.py.
 GESTURE_ACTION_MAPPING = {
     "thumbs_up": "confirm_action",
     "thumbs_down": "cancel_action",
     "open_palm": "pause_session",
     "fist": "emergency_stop",
     "pointing": "next_step",
-    "pinch": "select_item",
+    "pinch": "left_click",
+    "pinch_hold": "select_item",
+    "two_finger": "right_click",
+    "two_finger_move": "scroll",
     "swipe_right": "next_step",
     "swipe_left": "previous_step",
+    "swipe_up": "scroll_up",
+    "swipe_down": "scroll_down",
 }
 
 INTENT_TO_ACTION_MAPPING = {
@@ -116,6 +125,30 @@ class GestureService:
 
         # Database repository for worker custom gestures
         self.custom_repo = custom_repo or CustomGesturesRepository()
+
+        # Lazily-constructed worker interaction mapping resolver
+        # (lazy to avoid a circular import with worker_interaction_service)
+        self._interaction_mapping = None
+
+    def _resolve_standard_action(self, worker_profile_id: Optional[UUID], gesture_name: str) -> Optional[str]:
+        """
+        Resolve a standard gesture to an action using the worker's effective
+        mapping (worker override -> org preset -> canonical default).
+        """
+        if worker_profile_id is not None:
+            try:
+                if self._interaction_mapping is None:
+                    from services.worker_interaction_service import WorkerInteractionService
+                    self._interaction_mapping = WorkerInteractionService()
+                action = self._interaction_mapping.resolve_gesture_action(
+                    worker_profile_id, gesture_name
+                )
+                if action:
+                    return action
+            except Exception:
+                # Mapping resolution failure falls back to canonical defaults
+                pass
+        return GESTURE_ACTION_MAPPING.get(gesture_name)
 
     # =========================================================================
     # Custom Gesture Training & Database Persistence (§ 24, § 25, § 26, § 27)
@@ -265,10 +298,14 @@ class GestureService:
         pinky_ext = _dist(pinky_tip, wrist) > _dist(pinky_pip, wrist) * 1.15
         thumb_ext = _dist(thumb_tip, wrist) > _dist(thumb_mcp, wrist) * 1.15
 
-        # 1. Pinch Detection
+        # 1. Pinch Detection (thumb tip meets index tip)
         palm_span = _dist(index_mcp, wrist)
         pinch_dist = _dist(thumb_tip, index_tip)
         if palm_span > 0.04 and pinch_dist < 0.07:
+            # Two-finger pinch guard: index+middle extended together with a
+            # pinched thumb is the two-finger (right click) pose, not a tap.
+            if middle_ext and not ring_ext and not pinky_ext:
+                return "two_finger", 0.90, False, None
             return "pinch", 0.90, False, None
 
         # 2. Thumbs Up
@@ -296,6 +333,10 @@ class GestureService:
         # 4. Pointing
         if index_ext and not middle_ext and not ring_ext and not pinky_ext:
             return "pointing", 0.92, False, None
+
+        # 4b. Two-Finger Point (index + middle extended; right click / scroll pose)
+        if index_ext and middle_ext and not ring_ext and not pinky_ext:
+            return "two_finger", 0.88, False, None
 
         # 5. Open Palm
         if index_ext and middle_ext and ring_ext and pinky_ext and thumb_ext:
@@ -382,7 +423,7 @@ class GestureService:
                 else f"Custom Gesture Dwell: {int(dwell_progress * 100)}%"
             )
         else:
-            action_mapping = GESTURE_ACTION_MAPPING.get(gesture_name)
+            action_mapping = self._resolve_standard_action(worker_profile_id, gesture_name)
             custom_id = None
             display_msg = (
                 f"Gesture '{gesture_name}' triggered!"

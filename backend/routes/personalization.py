@@ -23,6 +23,7 @@ from pydantic import Field
 from app.dependencies import get_current_active_worker, require_roles
 from models.auth import AuthenticatedUserContext
 from models.base import StrictInputModel
+from services.worker_interaction_service import WorkerInteractionService
 from models.worker import (
     AdaptationEvaluationResult,
     AdaptationRecommendationRecord,
@@ -40,6 +41,13 @@ router = APIRouter(prefix="/personalization", tags=["Personalization"])
 def get_personalization_service() -> PersonalizationService:
     """Dependency provider for PersonalizationService."""
     return PersonalizationService()
+
+
+def get_worker_interaction_service() -> "WorkerInteractionService":
+    """Dependency provider for WorkerInteractionService."""
+    from services.worker_interaction_service import WorkerInteractionService
+
+    return WorkerInteractionService()
 
 
 class PersonalizationUpdatePayload(StrictInputModel):
@@ -127,6 +135,66 @@ def evaluate_and_adapt(
         auto_apply=auto_apply,
         organization_id=current_worker.organization_id,
     )
+
+
+class GestureMappingUpdatePayload(StrictInputModel):
+    """Worker-specific gesture mapping and calibration update payload."""
+    gesture_action_map: Optional[Dict[str, str]] = Field(
+        None, description="Per-gesture action overrides (gesture name -> action name)"
+    )
+    calibration: Optional[Dict[str, Any]] = Field(
+        None, description="Interaction calibration settings (dwell, sensitivity, debounce, ...)"
+    )
+    change_reason: str = Field(default="Worker gesture mapping update", min_length=1, max_length=500)
+
+
+@router.get(
+    "/me/gesture-mapping",
+    response_model=Dict[str, Any],
+    status_code=status.HTTP_200_OK,
+    summary="Get effective worker gesture -> action mapping and calibration",
+)
+def get_my_gesture_mapping(
+    current_worker: AuthenticatedUserContext = Depends(get_current_active_worker),
+    service: WorkerInteractionService = Depends(get_worker_interaction_service),
+) -> Dict[str, Any]:
+    """
+    Return the worker's effective gesture mapping (personalization override ->
+    organization preset -> canonical default) plus interaction calibration.
+
+    This is the PostgreSQL-authoritative mapping used by the workstation
+    gesture engine and the multimodal fusion resolver — never localStorage.
+    """
+    return service.get_effective_gesture_mapping(current_worker.worker_profile_id)
+
+
+@router.put(
+    "/me/gesture-mapping",
+    response_model=Dict[str, Any],
+    status_code=status.HTTP_200_OK,
+    summary="Update worker gesture mapping overrides and calibration",
+)
+def update_my_gesture_mapping(
+    payload: GestureMappingUpdatePayload,
+    current_worker: AuthenticatedUserContext = Depends(get_current_active_worker),
+    service: WorkerInteractionService = Depends(get_worker_interaction_service),
+) -> Dict[str, Any]:
+    """
+    Persist worker-specific gesture mapping overrides and/or calibration into
+    worker_personalizations (with audit history). Returns the new effective
+    mapping. Invalid action names are rejected with HTTP 422.
+    """
+    try:
+        return service.update_worker_mapping(
+            worker_profile_id=current_worker.worker_profile_id,
+            gesture_action_map=payload.gesture_action_map,
+            calibration=payload.calibration,
+            change_reason=payload.change_reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
 
 
 @router.get(

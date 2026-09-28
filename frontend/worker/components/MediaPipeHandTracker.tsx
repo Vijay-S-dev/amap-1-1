@@ -14,6 +14,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
 import { useAccessibility } from '@/shared/theme/AccessibilityContext';
+import { classifyHandPose } from '@/worker/lib/handPoses';
 import { t } from '@/shared/i18n/languages';
 
 // MediaPipe 21 3D Joint Connection Topology
@@ -65,116 +66,17 @@ export interface MultiHandResolution {
 }
 
 /**
- * Geometric Classification for an Individual Hand (Phase 4 Hardened)
- * Evaluates 21 3D landmarks for canonical AMAP gestures:
- * - THUMBS_UP (confirm_action)
- * - THUMBS_DOWN (cancel_action)
- * - FIST (emergency_stop)
- * - POINTING (orientation-robust next_step / point_focus)
- * - OPEN_PALM (pause_session)
- * - UNKNOWN (safely rejected)
+ * Geometric Classification for an Individual Hand.
+ * Delegates to the shared canonical classifier in worker/lib/handPoses.ts so
+ * the dwell pipeline and the real-time interaction engine classify poses
+ * identically. Kept as a named export for existing consumers/tests.
  */
 export function classifySingleHand(landmarks: Landmark3D[]): { gesture: string | null; confidence: number } {
-  if (!landmarks || landmarks.length < 21) {
+  const result = classifyHandPose(landmarks);
+  if (result.pose === 'NONE') {
     return { gesture: null, confidence: 0 };
   }
-
-  const wrist = landmarks[0];
-  const thumbIp = landmarks[3];
-  const thumbTip = landmarks[4];
-  const indexMcp = landmarks[5];
-  const indexPip = landmarks[6];
-  const indexTip = landmarks[8];
-  const middleMcp = landmarks[9];
-  const middlePip = landmarks[10];
-  const middleTip = landmarks[12];
-  const ringMcp = landmarks[13];
-  const ringPip = landmarks[14];
-  const ringTip = landmarks[16];
-  const pinkyMcp = landmarks[17];
-  const pinkyPip = landmarks[18];
-  const pinkyTip = landmarks[20];
-
-  const dist2d = (p1: Landmark3D, p2: Landmark3D) =>
-    Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
-
-  const dist3d = (p1: Landmark3D, p2: Landmark3D) => {
-    const dz = (p1.z || 0) - (p2.z || 0);
-    return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2 + dz * dz);
-  };
-
-  const palmSize = dist2d(wrist, middleMcp);
-  if (palmSize < 0.04) {
-    return { gesture: null, confidence: 0 };
-  }
-
-  // Robust Extension Metrics: supports both vertical extension and 3D radial extension
-  const isExtended = (tip: Landmark3D, pip: Landmark3D, mcp: Landmark3D): boolean => {
-    const verticalExt = tip.y < pip.y && tip.y < mcp.y;
-    const radialExt = dist3d(tip, wrist) > dist3d(pip, wrist) * 1.15 && dist3d(tip, mcp) > palmSize * 0.70;
-    return verticalExt || radialExt;
-  };
-
-  const isCurled = (tip: Landmark3D, mcp: Landmark3D): boolean => {
-    return dist3d(tip, mcp) < palmSize * 0.75;
-  };
-
-  const isIndexExtended = isExtended(indexTip, indexPip, indexMcp);
-  const isMiddleExtended = isExtended(middleTip, middlePip, middleMcp);
-  const isRingExtended = isExtended(ringTip, ringPip, ringMcp);
-  const isPinkyExtended = isExtended(pinkyTip, pinkyPip, pinkyMcp);
-
-  const isMiddleCurled = isCurled(middleTip, middleMcp);
-  const isRingCurled = isCurled(ringTip, ringMcp);
-  const isPinkyCurled = isCurled(pinkyTip, pinkyMcp);
-
-  // Thumb vertical directions
-  const isThumbUp = thumbTip.y < thumbIp.y && thumbTip.y < indexMcp.y;
-  const isThumbDown = thumbTip.y > thumbIp.y && thumbTip.y > wrist.y;
-
-  // 1. THUMBS UP: Thumb pointing up, other 4 fingers curled
-  if (isThumbUp && !isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
-    const extensionScore = Math.min(1.0, (indexPip.y - thumbTip.y) / (palmSize * 0.8));
-    const confidence = Math.max(0.78, Math.min(0.99, 0.78 + extensionScore * 0.21));
-    return { gesture: 'THUMBS_UP', confidence: parseFloat(confidence.toFixed(2)) };
-  }
-
-  // 2. THUMBS DOWN: Thumb pointing down, other 4 fingers curled (Phase 4 Hardened)
-  if (isThumbDown && !isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended) {
-    const extensionScore = Math.min(1.0, (thumbTip.y - wrist.y) / (palmSize * 0.8));
-    const confidence = Math.max(0.78, Math.min(0.99, 0.78 + extensionScore * 0.21));
-    return { gesture: 'THUMBS_DOWN', confidence: parseFloat(confidence.toFixed(2)) };
-  }
-
-  // 3. FIST: All 4 fingers curled, thumb not pointing up or down
-  if (!isIndexExtended && !isMiddleExtended && !isRingExtended && !isPinkyExtended && !isThumbUp && !isThumbDown) {
-    const maxFingertipDist = Math.max(
-      dist3d(indexTip, indexMcp),
-      dist3d(middleTip, middleMcp),
-      dist3d(ringTip, ringMcp),
-      dist3d(pinkyTip, pinkyMcp)
-    );
-    if (maxFingertipDist < palmSize * 0.70) {
-      return { gesture: 'FIST', confidence: 0.92 };
-    }
-  }
-
-  // 4. POINTING (Orientation-Robust):
-  // Index finger extended (upwards, horizontal, or forward), while middle, ring, pinky are curled
-  if (isIndexExtended && isMiddleCurled && isRingCurled && isPinkyCurled && !isThumbUp && !isThumbDown) {
-    const pointDist = dist3d(indexTip, indexMcp);
-    const confidence = Math.max(0.78, Math.min(0.98, 0.78 + (pointDist / palmSize) * 0.2));
-    return { gesture: 'POINTING', confidence: parseFloat(confidence.toFixed(2)) };
-  }
-
-  // 5. OPEN PALM: All 4 fingers extended + spread
-  if (isIndexExtended && isMiddleExtended && isRingExtended && isPinkyExtended) {
-    const spread = dist3d(thumbTip, pinkyTip);
-    const confidence = Math.max(0.82, Math.min(0.99, 0.82 + (spread / (palmSize * 2)) * 0.17));
-    return { gesture: 'OPEN_PALM', confidence: parseFloat(confidence.toFixed(2)) };
-  }
-
-  return { gesture: 'UNKNOWN', confidence: 0.50 };
+  return { gesture: result.pose, confidence: result.confidence };
 }
 
 /**
@@ -259,7 +161,21 @@ export interface HandTrackerProps {
   onHandFrame?: (hands: Landmark3D[][], labels: string[]) => void;
   enabled?: boolean;
   onCameraStateChange?: (state: CameraLifecycleState, error?: string) => void;
+  /**
+   * Poses eligible for dwell-confirmed one-shot execution. Poses outside this
+   * set are still classified and displayed, but their actions are owned by the
+   * real-time interaction engine (pointer / pinch clicks / two-finger / swipes)
+   * which has its own state machine — double execution is prevented.
+   */
+  dwellGestures?: string[];
 }
+
+/**
+ * Default dwell-confirmed gesture set for the workstation: discrete workflow
+ * poses only. PINCH / TWO_FINGER / POINTING are engine-managed (clicks,
+ * right-click/scroll, pointer aiming).
+ */
+export const DEFAULT_DWELL_GESTURES = ['THUMBS_UP', 'THUMBS_DOWN', 'OPEN_PALM', 'FIST'];
 
 export function MediaPipeHandTracker({
   onGestureDetected,
@@ -273,6 +189,7 @@ export function MediaPipeHandTracker({
   onHandFrame,
   enabled = true,
   onCameraStateChange,
+  dwellGestures = DEFAULT_DWELL_GESTURES,
 }: HandTrackerProps) {
   let accessibilityContext: any = null;
   try {
@@ -302,6 +219,7 @@ export function MediaPipeHandTracker({
     onHandFrame,
     onCameraStateChange,
     requiredDwellMs,
+    dwellGestures,
   });
 
   useEffect(() => {
@@ -313,6 +231,7 @@ export function MediaPipeHandTracker({
       onHandFrame,
       onCameraStateChange,
       requiredDwellMs,
+      dwellGestures,
     };
   });
 
@@ -748,6 +667,20 @@ export function MediaPipeHandTracker({
                 safeSetConfidence(highestConfidence);
                 if (cb.onGestureDetected) cb.onGestureDetected(dominantGesture, highestConfidence);
 
+                // Engine-managed poses (pinch/two-finger/pointing) are owned
+                // by the real-time interaction engine: display them, but do
+                // NOT dwell-confirm them here (prevents double execution).
+                if (!(cb.dwellGestures || []).includes(dominantGesture)) {
+                  safeSetDwellProgress(0);
+                  stabilityBufferRef.current = [];
+                  dwellStartTimeRef.current = null;
+                  if (isActionExecutedRef.current) {
+                    isActionExecutedRef.current = false;
+                    currentConfirmedGestureRef.current = null;
+                  }
+                  neutralStartTimeRef.current = null;
+                  safeSetPipelineStatus('HAND_DETECTED');
+                } else {
                 // Check for Valid Gesture Transition (MUST IMPLEMENT #4):
                 // If transitioning from Gesture A to Gesture B, reset execution latch so Gesture B can fire
                 if (
@@ -806,6 +739,7 @@ export function MediaPipeHandTracker({
                       }
                     }
                   }
+                }
                 }
               }
             }
@@ -989,6 +923,8 @@ export function MediaPipeHandTracker({
             {activeGesture === 'POINTING' && '👉'}
             {activeGesture === 'OPEN_PALM' && '✋'}
             {activeGesture === 'FIST' && '✊'}
+            {activeGesture === 'PINCH' && '🤏'}
+            {activeGesture === 'TWO_FINGER' && '✌️'}
           </span>
           <strong style={{ color: handCount > 0 && activeGesture ? 'var(--worker-cyan)' : pipelineStatus === 'CONFLICT' ? 'var(--accent-amber)' : '#fff' }}>
             {pipelineStatus === 'SEARCHING_FOR_HAND' && 'Searching for Hand(s)...'}

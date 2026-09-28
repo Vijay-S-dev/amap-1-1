@@ -27,6 +27,26 @@ class WorkSessionService:
                 return WorkSessionRead.model_validate(s)
         return None
 
+    def heartbeat(
+        self,
+        work_session_id: UUID,
+        worker_profile_id: UUID,
+    ) -> Optional[WorkSessionRead]:
+        """
+        Refresh the liveness heartbeat of the worker's own active/paused session.
+
+        Returns the updated session, or None when the session does not exist,
+        is already ended, or belongs to a different worker (never throws on
+        foreign sessions — callers surface "offline/unknown session").
+        """
+        session = self.repo.get_by_id(work_session_id)
+        if not session or session.get("worker_profile_id") != worker_profile_id:
+            return None
+        if session.get("status") not in ("active", "paused"):
+            return None
+        updated = self.repo.touch_heartbeat(work_session_id)
+        return WorkSessionRead.model_validate(updated) if updated else None
+
     def start_session(self, worker_profile_id: UUID) -> WorkSessionRead:
         """
         Start a new work session for a worker.

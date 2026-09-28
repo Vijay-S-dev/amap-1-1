@@ -31,6 +31,9 @@ interface WorkerItem {
   session_duration_seconds: number;
   has_open_assistance: boolean;
   is_emergency_stop: boolean;
+  is_online?: boolean;
+  last_activity_at?: string | null;
+  last_action_description?: string | null;
 }
 
 interface LiveWorkerMonitorProps {
@@ -101,6 +104,21 @@ export function LiveWorkerMonitor({ workers, onSelectWorker, onDispatchTask }: L
     const mins = Math.floor((seconds % 3600) / 60);
     if (hrs > 0) return `${hrs}h ${mins}m`;
     return `${mins}m`;
+  };
+
+  const formatLastActivity = (iso?: string | null) => {
+    if (!iso) return '—';
+    const ts = new Date(iso);
+    if (Number.isNaN(ts.getTime())) return '—';
+    const diffMs = Date.now() - ts.getTime();
+    if (diffMs < 0) return 'just now';
+    const secs = Math.floor(diffMs / 1000);
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.floor(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return ts.toLocaleDateString();
   };
 
   return (
@@ -184,6 +202,7 @@ export function LiveWorkerMonitor({ workers, onSelectWorker, onDispatchTask }: L
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.6rem' }}>
                   <div>
                     <strong style={{ fontSize: '1.1rem', color: 'white', display: 'block' }}>
+                      {worker.is_online ? '🟢 ' : '⚪ '}
                       {worker.full_name}
                     </strong>
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{worker.email}</span>
@@ -228,13 +247,31 @@ export function LiveWorkerMonitor({ workers, onSelectWorker, onDispatchTask }: L
                   )}
                 </div>
 
-                {/* Telemetry Row: Mode & Session */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '1rem' }}>
+                {/* Telemetry Row: Mode, Session, Last Activity, Last Action */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+                    gap: '0.4rem',
+                    fontSize: '0.78rem',
+                    color: 'var(--text-muted)',
+                    marginBottom: '1rem',
+                  }}
+                >
                   <span>
                     Mode: <strong style={{ color: 'var(--text-primary)', textTransform: 'capitalize' }}>{worker.interaction_mode}</strong>
                   </span>
                   <span>
                     Session: <strong style={{ color: 'var(--text-primary)' }}>{formatDuration(worker.session_duration_seconds)}</strong>
+                  </span>
+                  <span>
+                    Last activity: <strong style={{ color: 'var(--text-primary)' }}>{formatLastActivity(worker.last_activity_at)}</strong>
+                  </span>
+                  <span title={worker.last_action_description || ''} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    Last action:{' '}
+                    <strong style={{ color: 'var(--worker-cyan)' }}>
+                      {worker.last_action_description || '—'}
+                    </strong>
                   </span>
                 </div>
               </div>

@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.dependencies import get_current_active_worker
 from models.auth import AuthenticatedUserContext
+from models.base import StrictInputModel
 from models.session import WorkSessionRead
 from services.base import ConflictError, NotFoundError, UnauthorizedError, ValidationError
 from services.work_session_service import WorkSessionService
@@ -26,6 +27,11 @@ router = APIRouter(prefix="/sessions", tags=["Work Sessions"])
 def get_work_session_service() -> WorkSessionService:
     """Dependency provider for WorkSessionService."""
     return WorkSessionService()
+
+
+class HeartbeatPayload(StrictInputModel):
+    """Optional payload identifying which session to heartbeat."""
+    work_session_id: Optional[UUID] = None
 
 
 @router.post(
@@ -57,6 +63,37 @@ def get_active_session(
 ) -> Optional[WorkSessionRead]:
     """Retrieve the current active or paused session for the authenticated worker."""
     return service.get_active_session(worker_profile_id=current_worker.worker_profile_id)
+
+
+@router.post(
+    "/heartbeat",
+    response_model=Optional[WorkSessionRead],
+    status_code=status.HTTP_200_OK,
+    summary="Refresh worker session liveness heartbeat",
+)
+def heartbeat_session(
+    payload: Optional[HeartbeatPayload] = None,
+    current_worker: AuthenticatedUserContext = Depends(get_current_active_worker),
+    service: WorkSessionService = Depends(get_work_session_service),
+) -> Optional[WorkSessionRead]:
+    """
+    Refresh the liveness heartbeat for the worker's active work session.
+
+    The supervisor live worker monitor uses `last_heartbeat_at` to distinguish
+    genuinely online workers from stale session rows. Accepts an optional
+    `work_session_id`; when omitted, the worker's current active/paused session
+    is used. Returns the session, or None when no live session exists.
+    """
+    session_id = payload.work_session_id if payload and payload.work_session_id else None
+    if session_id is None:
+        active = service.get_active_session(worker_profile_id=current_worker.worker_profile_id)
+        if active is None:
+            return None
+        session_id = active.id
+    return service.heartbeat(
+        work_session_id=session_id,
+        worker_profile_id=current_worker.worker_profile_id,
+    )
 
 
 @router.post(

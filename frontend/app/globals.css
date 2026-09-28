@@ -285,3 +285,46 @@ html, body {
   font-size: 0.85rem;
   color: var(--text-secondary);
 }
+
+/* ==========================================================================
+   Gesture Interaction Engine visual affordances
+   ========================================================================== */
+
+/* Virtual-pointer selection highlight (select_item action) */
+[data-amap-selected='true'] {
+  outline: 3px solid var(--worker-cyan, #00f2fe) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 18px rgba(0, 242, 254, 0.55) !important;
+  border-radius: 8px;
+}
+
+/* Element currently being dragged by the gesture engine */
+[data-amap-dragging='true'] {
+  opacity: 0.45 !important;
+}
+
+/* Drop zone currently hovered during a gesture drag */
+[data-amap-drop-hover='true'] {
+  border-color: var(--org-emerald, #10b981) !important;
+  background: rgba(16, 185, 129, 0.16) !important;
+  box-shadow: 0 0 22px rgba(16, 185, 129, 0.4);
+}
+
+/* Completed step chip in the workstation timeline */
+.amap-step-completed-chip {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid var(--org-emerald, #10b981);
+  color: var(--org-emerald, #10b981);
+}
+
+@keyframes amap-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.55;
+  }
+}

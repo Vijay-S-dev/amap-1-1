@@ -23,10 +23,12 @@ class WorkSessionUpdate(StrictInputModel):
 
 class WorkSessionRead(AMAPBaseModel):
     id: UUID
+    organization_id: Optional[UUID] = None
     worker_profile_id: UUID
     status: str
     started_at: datetime
     ended_at: Optional[datetime] = None
+    last_heartbeat_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

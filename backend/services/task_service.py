@@ -318,6 +318,23 @@ class TaskService:
             "steps": steps,
         }
 
+    def get_step_executions(
+        self,
+        workflow_assignment_id: UUID,
+        worker_profile_id: UUID,
+    ) -> List[Dict[str, Any]]:
+        """
+        Return the worker's own workflow step executions (completed + others)
+        for an assignment so clients can restore persisted progress after a
+        refresh or re-login. Enforces worker ownership of the assignment.
+        """
+        assignment = self.workflow_assignments_repo.get_by_id(workflow_assignment_id)
+        if not assignment:
+            raise NotFoundError(f"Workflow assignment {workflow_assignment_id} not found.")
+        if assignment["worker_profile_id"] != worker_profile_id:
+            raise UnauthorizedError("Workflow assignment does not belong to this worker.")
+        return self.step_executions_repo.list_by_workflow_assignment_id(workflow_assignment_id)
+
     def get_workflow_steps(self, workflow_id: UUID) -> List[Dict[str, Any]]:
         """Return ordered steps for a workflow."""
         workflow = self.workflows_repo.get_by_id(workflow_id)

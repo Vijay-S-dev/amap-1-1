@@ -202,6 +202,56 @@ class ApiClient {
     return await this.request<WorkSession>('/sessions/active');
   }
 
+  async startWorkSession(): Promise<WorkSession> {
+    return await this.request<WorkSession>('/sessions/start', { method: 'POST' });
+  }
+
+  async heartbeatWorkSession(workSessionId?: string | null): Promise<WorkSession | null> {
+    return await this.request<WorkSession | null>('/sessions/heartbeat', {
+      method: 'POST',
+      body: JSON.stringify(workSessionId ? { work_session_id: workSessionId } : {}),
+    });
+  }
+
+  async pauseWorkSession(workSessionId: string): Promise<WorkSession> {
+    return await this.request<WorkSession>(`/sessions/${workSessionId}/pause`, { method: 'POST' });
+  }
+
+  async resumeWorkSession(workSessionId: string): Promise<WorkSession> {
+    return await this.request<WorkSession>(`/sessions/${workSessionId}/resume`, { method: 'POST' });
+  }
+
+  async endWorkSession(workSessionId: string): Promise<WorkSession> {
+    return await this.request<WorkSession>(`/sessions/${workSessionId}/end?status=completed`, {
+      method: 'POST',
+    });
+  }
+
+  async getGestureMapping(): Promise<{
+    worker_profile_id: string;
+    gesture_action_map: Record<string, string>;
+    sources: Record<string, string>;
+    calibration: Record<string, any>;
+  }> {
+    return await this.request('/personalization/me/gesture-mapping');
+  }
+
+  async updateGestureMapping(payload: {
+    gesture_action_map?: Record<string, string>;
+    calibration?: Record<string, any>;
+    change_reason?: string;
+  }): Promise<{
+    worker_profile_id: string;
+    gesture_action_map: Record<string, string>;
+    sources: Record<string, string>;
+    calibration: Record<string, any>;
+  }> {
+    return await this.request('/personalization/me/gesture-mapping', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
   async getWorkerReadiness(workerId: string): Promise<{
     worker_id: string;
     is_fresher: boolean;
@@ -246,6 +296,12 @@ class ApiClient {
     return await this.request<any>(`/tasks/assignments/${assignmentId}/start`, {
       method: 'POST',
     });
+  }
+
+  async getStepExecutions(workflowAssignmentId: string): Promise<any[]> {
+    return await this.request<any[]>(
+      `/tasks/workflows/assignments/${workflowAssignmentId}/executions`
+    );
   }
 
   async getTaskDetails(taskId: string): Promise<TaskDetails> {

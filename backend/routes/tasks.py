@@ -210,6 +210,34 @@ def get_workflow_steps(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
+@router.get(
+    "/workflows/assignments/{assignment_id}/executions",
+    response_model=List[Dict[str, Any]],
+    status_code=status.HTTP_200_OK,
+    summary="List workflow step executions for an assignment (persisted progress)",
+)
+def list_step_executions(
+    assignment_id: UUID,
+    current_worker: AuthenticatedUserContext = Depends(get_current_active_worker),
+    service: TaskService = Depends(get_task_service),
+) -> List[Dict[str, Any]]:
+    """
+    Return the authenticated worker's step executions for a workflow
+    assignment. Used by the workstation to restore persisted progress after a
+    page refresh or re-login (the current step is derived from the most recent
+    completed step). Strictly worker-owned data.
+    """
+    try:
+        return service.get_step_executions(
+            workflow_assignment_id=assignment_id,
+            worker_profile_id=current_worker.worker_profile_id,
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except UnauthorizedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
 @router.post(
     "/workflows/assignments/{assignment_id}/steps/{step_id}/execute",
     response_model=Dict[str, Any],

@@ -23,7 +23,9 @@ from models.supervisor import (
 )
 from repositories.assistance_requests import AssistanceRequestsRepository
 from repositories.audit_events import AuditEventsRepository
+from repositories.execution_events import ExecutionEventsRepository
 from repositories.interaction_configurations import InteractionConfigurationsRepository
+from repositories.interaction_events import InteractionEventsRepository
 from repositories.task_results import TaskResultsRepository
 from repositories.task_workflows import TaskWorkflowsRepository
 from repositories.tasks import TasksRepository
@@ -61,6 +63,8 @@ class SupervisorService:
         step_executions_repo: Optional[WorkflowStepExecutionsRepository] = None,
         worker_readiness_repo: Optional[WorkerReadinessRepository] = None,
         task_results_repo: Optional[TaskResultsRepository] = None,
+        execution_events_repo: Optional[ExecutionEventsRepository] = None,
+        interaction_events_repo: Optional[InteractionEventsRepository] = None,
     ) -> None:
         self.users_repo = users_repo or UsersRepository()
         self.worker_profiles_repo = worker_profiles_repo or WorkerProfilesRepository()
@@ -78,6 +82,13 @@ class SupervisorService:
         self.step_executions_repo = step_executions_repo or WorkflowStepExecutionsRepository()
         self.worker_readiness_repo = worker_readiness_repo or WorkerReadinessRepository()
         self.task_results_repo = task_results_repo or TaskResultsRepository()
+        self.execution_events_repo = execution_events_repo or ExecutionEventsRepository()
+        self.interaction_events_repo = interaction_events_repo or InteractionEventsRepository()
+
+    # A session counts as "online" only while its liveness heartbeat is fresh.
+    # Without this, a stale session row keeps a worker falsely "WORKING"
+    # forever after they leave the workstation.
+    WORKER_ONLINE_WINDOW_SECONDS = 120
 
     def _worker_workflow_progress(self, worker_profile_id: UUID, task_id: UUID) -> Optional[Dict[str, Any]]:
         """Derive real workflow step progress for a worker's active task.
@@ -161,7 +172,9 @@ class SupervisorService:
         emergency_count = 0
 
         for w in workers:
-            if w.status != "OFFLINE":
+            # "Active" means genuinely online (fresh workstation heartbeat),
+            # not merely possessing a possibly-stale session row.
+            if w.is_online:
                 active_count += 1
             if w.status == "AVAILABLE":
                 available_count += 1
@@ -223,7 +236,13 @@ class SupervisorService:
 
             # 1. Check active work session
             sessions = self.work_sessions_repo.list_by_worker_profile_id(wp_id)
-            active_session = next((s for s in sessions if s.get("status") == "active"), None)
+            # A paused session is still the worker's live session (they are at
+            # the station); prefer a fully active one, else the paused one, so
+            # the supervisor dashboard reflects the PAUSED state.
+            active_session = next(
+                (s for s in sessions if s.get("status") == "active"), None
+            ) or next((s for s in sessions if s.get("status") == "paused"), None)
+            session_is_paused = bool(active_session) and active_session.get("status") == "paused"
 
             session_duration = 0
             if active_session and active_session.get("started_at"):
@@ -231,6 +250,28 @@ class SupervisorService:
                 if started.tzinfo is None:
                     started = started.replace(tzinfo=timezone.utc)
                 session_duration = int((datetime.now(timezone.utc) - started).total_seconds())
+
+            # 1b. Liveness: a session only counts as online while its
+            # heartbeat (refreshed by the worker workstation) is fresh.
+            # Grace period: a just-started session with no heartbeat yet
+            # counts as online until the first heartbeat arrives (or the
+            # window elapses).
+            heartbeat_at = None
+            is_online = False
+            if active_session:
+                heartbeat_at = active_session.get("last_heartbeat_at")
+                if heartbeat_at:
+                    hb = heartbeat_at
+                    if hb.tzinfo is None:
+                        hb = hb.replace(tzinfo=timezone.utc)
+                    age = (datetime.now(timezone.utc) - hb).total_seconds()
+                    is_online = 0 <= age <= self.WORKER_ONLINE_WINDOW_SECONDS
+                elif active_session.get("started_at"):
+                    started_at = active_session["started_at"]
+                    if started_at.tzinfo is None:
+                        started_at = started_at.replace(tzinfo=timezone.utc)
+                    age = (datetime.now(timezone.utc) - started_at).total_seconds()
+                    is_online = 0 <= age <= self.WORKER_ONLINE_WINDOW_SECONDS
 
             # 2. Check active task assignment — prefer work actually in
             # progress, otherwise the most recently created open assignment.
@@ -288,12 +329,17 @@ class SupervisorService:
                 for r in open_requests
             )
 
-            # 4. Compute status
+            # 4. Compute status — assistance/emergency states are surfaced even
+            # when the worker went offline (supervisor must still see them).
             status = "OFFLINE"
             if is_emergency or has_open_assistance:
                 status = "ASSISTANCE_REQUESTED"
             elif active_session:
-                if active_assignment:
+                if not is_online:
+                    status = "OFFLINE"  # stale session row, worker not present
+                elif session_is_paused:
+                    status = "PAUSED"  # worker paused their session (open palm)
+                elif active_assignment:
                     status = "PAUSED" if active_assignment.get("status") == "paused" else "WORKING"
                 else:
                     status = "AVAILABLE"
@@ -301,6 +347,67 @@ class SupervisorService:
                 recent_done = [a for a in assignments if a.get("status") == "completed"]
                 if recent_done:
                     status = "COMPLETED"
+
+            # 4b. Real last-activity telemetry: the newest of session
+            # heartbeat, execution events, interaction events, assignment
+            # updates, and session start — never the immutable user row.
+            last_activity = None
+            last_action_description = None
+            candidates: List[datetime] = []
+            if heartbeat_at:
+                hb = heartbeat_at
+                if hb.tzinfo is None:
+                    hb = hb.replace(tzinfo=timezone.utc)
+                candidates.append(hb)
+                last_activity = hb
+            try:
+                exec_events = self.execution_events_repo.list_by_worker_profile_id(wp_id)
+                if exec_events:
+                    latest_exec = max(
+                        (e for e in exec_events if e.get("occurred_at")),
+                        key=lambda e: e["occurred_at"],
+                        default=None,
+                    )
+                    if latest_exec:
+                        occ = latest_exec["occurred_at"]
+                        if occ.tzinfo is None:
+                            occ = occ.replace(tzinfo=timezone.utc)
+                        candidates.append(occ)
+                        event_type = str(latest_exec.get("event_type") or "")
+                        action_name = (latest_exec.get("event_data") or {}).get("action_name")
+                        last_action_description = action_name or event_type or None
+            except Exception:
+                pass
+            try:
+                inter_events = self.interaction_events_repo.list_by_worker_profile_id(wp_id)
+                if inter_events:
+                    latest_inter = max(
+                        (e for e in inter_events if e.get("occurred_at")),
+                        key=lambda e: e["occurred_at"],
+                        default=None,
+                    )
+                    if latest_inter:
+                        occ = latest_inter["occurred_at"]
+                        if occ.tzinfo is None:
+                            occ = occ.replace(tzinfo=timezone.utc)
+                        candidates.append(occ)
+            except Exception:
+                pass
+            if active_session:
+                for key in ("updated_at", "started_at"):
+                    val = active_session.get(key)
+                    if val:
+                        v = val
+                        if v.tzinfo is None:
+                            v = v.replace(tzinfo=timezone.utc)
+                        candidates.append(v)
+            if active_assignment and active_assignment.get("updated_at"):
+                val = active_assignment["updated_at"]
+                if val.tzinfo is None:
+                    val = val.replace(tzinfo=timezone.utc)
+                candidates.append(val)
+            if candidates:
+                last_activity = max(candidates)
 
             # 5. Interaction mode + readiness health — sourced from the
             # worker_readiness table (onboarding validation), NOT hardcoded.
@@ -338,7 +445,9 @@ class SupervisorService:
                 session_duration_seconds=session_duration,
                 has_open_assistance=has_open_assistance,
                 is_emergency_stop=is_emergency,
-                last_activity_at=user.get("updated_at") or user.get("created_at"),
+                is_online=is_online,
+                last_activity_at=last_activity,
+                last_action_description=last_action_description,
             )
             result.append(item)
 

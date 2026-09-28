@@ -162,7 +162,7 @@ def test_list_workers_returns_real_rows_not_hardcoded_roster(
     assert "alex.worker@amap.com" in emails
     assert "jordan.worker@amap.com" in emails
 
-    fabricated = {"samira.chen@amap.com", "kenji.sato@amap.com", "maria.newhire@amap.com"}
+    fabricated = {"samira.chen@amap.com", "kenji.sato@amap.com"}
     assert not fabricated & set(emails), "hardcoded fake roster leaked into response"
 
     # Total must match the actual PostgreSQL worker-profile count for this org

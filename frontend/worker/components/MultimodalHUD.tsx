@@ -36,6 +36,22 @@ interface MultimodalHUDProps {
   isEmergencyStopped?: boolean;
   /** Active work session id (server-side) included in fusion payloads. */
   workSessionId?: string | null;
+  /**
+   * Raw tracked-hand frame tap for the real-time interaction engine
+   * (pointer/click/drag/scroll). Receives EVERY frame unthrottled.
+   */
+  onRawHandFrame?: (hands: { x: number; y: number; z?: number }[][], labels: string[]) => void;
+  /**
+   * Shared ref exposing the most recent ENGINE gesture perception (pose +
+   * pointer position) so the voice pipeline can fuse concurrent engine
+   * gestures (e.g. hand over element + "select").
+   */
+  externalGestureRef?: React.MutableRefObject<{
+    gesture: string;
+    confidence: number;
+    timestamp: number;
+    position?: { x: number; y: number };
+  } | null>;
 }
 
 export function MultimodalHUD({
@@ -43,6 +59,8 @@ export function MultimodalHUD({
   dwellTimeMs = 500,
   isEmergencyStopped = false,
   workSessionId = null,
+  onRawHandFrame,
+  externalGestureRef,
 }: MultimodalHUDProps) {
   const { language, modality, setModality, announce, playAudioCue } = useAccessibility();
 
@@ -353,23 +371,39 @@ export function MultimodalHUD({
         },
       ];
 
-      // Check for concurrent gesture in the 1500ms temporal window
-      if (
-        lastPerceivedGestureRef.current &&
-        now - lastPerceivedGestureRef.current.timestamp <= 1500
-      ) {
-        const rawGConf = lastPerceivedGestureRef.current.confidence;
+      // Check for concurrent gesture in the 1500ms temporal window.
+      // Both dwell-confirmed gestures and real-time engine gestures (pose
+      // under the virtual pointer) participate in cross-modal fusion.
+      const hudGesture = lastPerceivedGestureRef.current;
+      const engineGesture = externalGestureRef?.current || null;
+      const hudTs = hudGesture ? hudGesture.timestamp : 0;
+      const engTs = engineGesture ? engineGesture.timestamp : 0;
+      const recentGesture =
+        engTs >= hudTs ? engineGesture : hudGesture && now - hudGesture.timestamp <= 1500 ? hudGesture : null;
+
+      if (recentGesture && now - recentGesture.timestamp <= 1500) {
+        const rawGConf = recentGesture.confidence;
         const gConf = rawGConf > 1 ? Number((rawGConf / 100).toFixed(2)) : rawGConf;
+        const contextData: Record<string, unknown> = {
+          gesture: recentGesture.gesture,
+          dwell_time_ms: dwellTimeMs,
+          source: engTs >= hudTs ? 'gesture-engine' : 'hand-landmarker',
+        };
+        if (engineGesture && engTs >= hudTs && engineGesture.position) {
+          // Spatial binding: on-screen pointer position for the fused action.
+          contextData.spatial_x = engineGesture.position.x;
+          contextData.spatial_y = engineGesture.position.y;
+          contextData.coordinates = {
+            x: engineGesture.position.x,
+            y: engineGesture.position.y,
+          };
+        }
         inputs.push({
           mode: 'gesture',
-          raw_intent: lastPerceivedGestureRef.current.gesture.toLowerCase(),
+          raw_intent: recentGesture.gesture.toLowerCase(),
           confidence: gConf,
-          timestamp_ms: lastPerceivedGestureRef.current.timestamp,
-          context_data: {
-            gesture: lastPerceivedGestureRef.current.gesture,
-            dwell_time_ms: dwellTimeMs,
-            source: 'hand-landmarker',
-          },
+          timestamp_ms: recentGesture.timestamp,
+          context_data: contextData,
         });
       }
 
@@ -395,7 +429,7 @@ export function MultimodalHUD({
     } finally {
       isVoiceProcessingRef.current = false;
     }
-  }, [isEmergencyStopped, language, processFusedMultimodalCandidate]);
+  }, [isEmergencyStopped, language, processFusedMultimodalCandidate, externalGestureRef]);
 
   const handleRecorderError = useCallback((message: string) => {
     setMicErrorMessage(message);
@@ -570,7 +604,12 @@ export function MultimodalHUD({
             showLabels={false}
             requiredDwellMs={dwellTimeMs}
             enabled={isGestureActive}
-            onHandFrame={handleHandFrame}
+            onHandFrame={(hands, labels) => {
+              // Real-time engine first (unthrottled), then the server
+              // gesture pipeline (internally throttled to ~8 fps).
+              onRawHandFrame?.(hands, labels);
+              handleHandFrame(hands, labels);
+            }}
             onCameraStateChange={handleCameraStateChange}
             onHandPresenceChange={(present) => {
               setHasHandInView(present);
