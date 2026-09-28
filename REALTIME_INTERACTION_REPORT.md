@@ -191,6 +191,7 @@ MediaPipe assets remaining in place (`frontend/public/mediapipe/wasm/*`,
 | MediaPipe assets | `vision_wasm_internal.wasm` + `hand_landmarker.task` → **200** |
 | i18n (English/Hindi) | Not regressed (base page used 1 `t()` call; i18n-heavy components untouched) **and extended**: ~45 new dictionary keys in both languages (`workstation_*`, `control_panel_*`, `banner_*`, `cursor_state_*`), new `tParams()` placeholder helper; wired into WorkflowStepViewer, VirtualCursor, GestureControlPanel, and the paused/e-stop banners |
 | Unified runner | `scripts/run_all_tests.py` now includes the realtime-engine pytest suite, the frontend engine unit tests (`node`), and the E2E worker journey |
+| Pre-existing `scripts/ci_e2e.py` (CI critical path) | **17/17 PASS** against the live backend — health, worker/admin login, invalid-password 401, RBAC denials, voice→confirm_action, fusion (voice-only / reinforcing / invalid), action execution + execution_events persistence, department create/soft-delete, accessibility preference persistence, audit actor integrity |
 
 Note on the live preview: running `next build` while `next dev` is serving corrupts
 the shared `.next` webpack cache (symptom: `__webpack_modules__[moduleId] is not
