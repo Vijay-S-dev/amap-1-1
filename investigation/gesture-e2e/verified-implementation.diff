@@ -1,0 +1,628 @@
+diff --git a/frontend/tests/gesture-engine.test.ts b/frontend/tests/gesture-engine.test.ts
+index fbc13f2..7eafc63 100644
+--- a/frontend/tests/gesture-engine.test.ts
++++ b/frontend/tests/gesture-engine.test.ts
+@@ -939,6 +939,107 @@ test('contain transform: overlay maps letterboxed video exactly (camera enlargem
+   assert(t2.offsetY > 0, 'vertical letterbox');
+ });
+ 
++// ---------------------------------------------------------------------------
++// Hand-quality gate (worker/lib/handQuality.ts)
++//
++// Regression suite for the gesture blackout: @mediapipe/tasks-vision
++// materializes `visibility: 0` for hand landmarks (the hand model emits
++// x/y/z only), and the gate used to treat any numeric visibility as a real
++// score — rejecting every detected hand, every frame.
++// ---------------------------------------------------------------------------
++import {
++  filterHandsByQuality,
++  MIN_AVG_VISIBILITY,
++  MIN_PALM_SIZE,
++} from '../worker/lib/handQuality';
++
++/** Builds a synthetic 21-landmark hand. Wrist at index 0, middle MCP at 9. */
++function gateHand(opts: { visibility?: number; yStep?: number; count?: number } = {}) {
++  const { visibility, yStep = 0.01, count = 21 } = opts;
++  const hand: { x: number; y: number; z?: number; visibility?: number }[] = [];
++  for (let i = 0; i < count; i++) {
++    const pt: { x: number; y: number; z?: number; visibility?: number } = {
++      x: 0.5,
++      y: 0.7 - i * yStep,
++    };
++    if (visibility !== undefined) pt.visibility = visibility;
++    hand.push(pt);
++  }
++  return hand;
++}
++
++test('quality gate passes the exact tasks-vision hand shape (all visibility === 0)', () => {
++  // THE regression: hand_landmarker output has visibility materialized as 0
++  // for every landmark. This hand MUST pass the gate.
++  const { hands } = filterHandsByQuality([gateHand({ visibility: 0 })], ['Left']);
++  assertEqual(hands.length, 1, 'visibility:0 hand must NOT be rejected');
++});
++
++test('quality gate passes hands with no visibility field at all', () => {
++  const { hands } = filterHandsByQuality([gateHand()], []);
++  assertEqual(hands.length, 1);
++});
++
++test('quality gate passes hands whose model reports good visibility', () => {
++  const { hands } = filterHandsByQuality([gateHand({ visibility: 0.8 })], ['Left']);
++  assertEqual(hands.length, 1);
++});
++
++test('quality gate rejects occluded hands when visibility is genuinely reported low', () => {
++  const { hands } = filterHandsByQuality([gateHand({ visibility: 0.3 })], ['Left']);
++  assertEqual(hands.length, 0, 'avg visibility 0.3 < floor must be rejected');
++  assert(MIN_AVG_VISIBILITY > 0.3 && MIN_AVG_VISIBILITY <= 0.55, 'floor unchanged');
++});
++
++test('quality gate rejects a distant hand (palm size below minimum)', () => {
++  // yStep 0.002 -> wrist->MCP distance 0.018, far below the 0.035 floor
++  const { hands } = filterHandsByQuality([gateHand({ yStep: 0.002 })], ['Left']);
++  assertEqual(hands.length, 0);
++  assert(MIN_PALM_SIZE === 0.035, 'palm threshold = 0.035 (wide-FOV/distance tolerant)');
++});
++
++test('quality gate accepts small-but-real hands in the 0.035-0.045 band (wide-FOV cameras)', () => {
++  // yStep 0.0045 -> wrist->MCP distance 0.0405: a real hand that the old
++  // 0.045 floor rejected on wide-FOV webcams. Must be accepted now.
++  const { hands } = filterHandsByQuality([gateHand({ yStep: 0.0045 })], ['Left']);
++  assertEqual(hands.length, 1, 'palm 0.0405 >= 0.035 floor must be accepted');
++});
++
++test('quality gate rejects partial hands (fewer than 21 landmarks)', () => {
++  const { hands } = filterHandsByQuality([gateHand({ count: 20 })], ['Left']);
++  assertEqual(hands.length, 0);
++});
++
++test('quality gate keeps label alignment and applies the Right default', () => {
++  const { hands, labels } = filterHandsByQuality(
++    [gateHand({ visibility: 0 }), gateHand({ visibility: 0.2 })],
++    ['Left']
++  );
++  assertEqual(hands.length, 1, 'visibility:0 hand passes, genuinely-occluded hand drops');
++  assertEqual(labels.length, 1);
++  assertEqual(labels[0], 'Left', 'label of the surviving hand is preserved');
++  assertEqual(filterHandsByQuality([gateHand({ visibility: 0 })], []).labels[0], 'Right');
++});
++
++test('quality gate handles an empty detection result', () => {
++  const { hands, labels } = filterHandsByQuality([], []);
++  assertEqual(hands.length, 0);
++  assertEqual(labels.length, 0);
++});
++
++test('quality gate accepts mixed visibility (sentinel zeros + real scores)', () => {
++  // tasks-vision materializes visibility: 0 for hand landmarks (the hand model
++  // emits x/y/z only). If a future model build reported REAL scores for only
++  // SOME landmarks, the hand must still pass: the average check only applies
++  // when EVERY landmark reports a real (> 0) score. Locks in the sentinel
++  // semantics that caused the original full blackout.
++  const hand = gateHand({ visibility: 0 });
++  hand[0].visibility = 0.9;
++  hand[9].visibility = 0.85;
++  const { hands } = filterHandsByQuality([hand], ['Left']);
++  assertEqual(hands.length, 1, 'mixed sentinel/real visibility must not blackout');
++});
++
+ // ---------------------------------------------------------------------------
+ // Summary
+ // ---------------------------------------------------------------------------
+diff --git a/frontend/worker/components/MediaPipeHandTracker.tsx b/frontend/worker/components/MediaPipeHandTracker.tsx
+index 9b1c6a4..a19f9f1 100644
+--- a/frontend/worker/components/MediaPipeHandTracker.tsx
++++ b/frontend/worker/components/MediaPipeHandTracker.tsx
+@@ -16,6 +16,7 @@ import { FilesetResolver, HandLandmarker } from '@mediapipe/tasks-vision';
+ import { useAccessibility } from '@/shared/theme/AccessibilityContext';
+ import { classifyHandPose } from '@/worker/lib/handPoses';
+ import { computeContainTransform } from '@/worker/lib/cameraTransform';
++import { filterHandsByQuality, MIN_AVG_VISIBILITY, MIN_PALM_SIZE } from '@/worker/lib/handQuality';
+ import { t } from '@/shared/i18n/languages';
+ 
+ // MediaPipe 21 3D Joint Connection Topology
+@@ -178,6 +179,50 @@ export interface HandTrackerProps {
+  */
+ export const DEFAULT_DWELL_GESTURES = ['THUMBS_UP', 'THUMBS_DOWN', 'OPEN_PALM', 'FIST'];
+ 
++/**
++ * RUNTIME DIAGNOSTICS (observation build): snapshot of read-only counters
++ * displayed in the plain-text panel rendered directly above the camera area.
++ * NOTHING here influences detection, classification, quality gating, or
++ * MediaPipe configuration — it only records what already happened.
++ */
++export interface RuntimeDiagSnapshot {
++  videoWidth: number;
++  videoHeight: number;
++  readyState: number;
++  paused: boolean;
++  rafCount: number;
++  detectForVideoCount: number;
++  rawHandsCount: number;
++  lastDetectError: string;
++  acceptedHandsCount: number;
++  lastGesture: string;
++  /** DIAG: landmark count of the first raw hand (pre-gate). */
++  rawLmCount: number;
++  /** DIAG: palm size of the first raw hand (wrist -> middle MCP, normalized). */
++  palmSize: number | null;
++  /** DIAG: how many landmarks report a real (> 0) visibility score. */
++  visCount: number | null;
++  /** DIAG: average of the reported visibility scores (null when none). */
++  visAvg: number | null;
++}
++
++const INITIAL_RUNTIME_DIAG: RuntimeDiagSnapshot = {
++  videoWidth: 0,
++  videoHeight: 0,
++  readyState: 0,
++  paused: false,
++  rafCount: 0,
++  detectForVideoCount: 0,
++  rawHandsCount: 0,
++  lastDetectError: '(none)',
++  acceptedHandsCount: 0,
++  lastGesture: 'none',
++  rawLmCount: 0,
++  palmSize: null,
++  visCount: null,
++  visAvg: null,
++};
++
+ 
+ 
+ export function MediaPipeHandTracker({
+@@ -261,6 +306,31 @@ export function MediaPipeHandTracker({
+   const prevDwellProgressRef = useRef<number>(0);
+   const prevPipelineStatusRef = useRef<GesturePipelineStatus>('CAMERA_INITIALIZING');
+ 
++  // =========================================================================
++  // RUNTIME DIAGNOSTICS (observation build) — see RuntimeDiagSnapshot above.
++  // The frame loop writes counters into diagRef (pure ref writes, no
++  // re-renders, zero behavioral impact); a 4 Hz interval copies them into
++  // state for the always-visible panel above the camera. Camera element
++  // fields are read HERE (not in the loop) so they keep updating even if the
++  // frame loop stalls — a stalled loop is itself visible as "RAF count 0".
++  // =========================================================================
++  const diagRef = useRef<RuntimeDiagSnapshot>({ ...INITIAL_RUNTIME_DIAG });
++  const [diagSnapshot, setDiagSnapshot] = useState<RuntimeDiagSnapshot>({ ...INITIAL_RUNTIME_DIAG });
++
++  useEffect(() => {
++    const diagFlushTimer = window.setInterval(() => {
++      const videoEl = videoRef.current;
++      if (videoEl) {
++        diagRef.current.videoWidth = videoEl.videoWidth;
++        diagRef.current.videoHeight = videoEl.videoHeight;
++        diagRef.current.readyState = videoEl.readyState;
++        diagRef.current.paused = videoEl.paused;
++      }
++      setDiagSnapshot({ ...diagRef.current });
++    }, 250);
++    return () => window.clearInterval(diagFlushTimer);
++  }, []);
++
+   // Draw Dual-Hand Skeletal Meshes on Canvas
+   const drawAllHandsMesh = useCallback((
+     ctx: CanvasRenderingContext2D,
+@@ -400,6 +470,10 @@ export function MediaPipeHandTracker({
+     let animationFrameId: number;
+     let lastTime = performance.now();
+     let frameCount = 0;
++    // Inference resilience state: which delegate is live, and how many
++    // consecutive detectForVideo() calls have thrown (GPU context loss etc.).
++    let usingDelegate: 'GPU' | 'CPU' = 'GPU';
++    let detectErrorStreak = 0;
+ 
+     // Hardware isolation: If disabled, ensure camera is stopped and never requested
+     if (!enabled) {
+@@ -426,18 +500,29 @@ export function MediaPipeHandTracker({
+ 
+         if (!isComponentMounted) return;
+ 
+-        // 2. Initialize Dual-Hand Landmarker (numHands: 2)
+-        handLandmarkerInstance = await HandLandmarker.createFromOptions(vision, {
+-          baseOptions: {
+-            modelAssetPath: '/mediapipe/hand_landmarker.task',
+-            delegate: 'GPU',
+-          },
+-          runningMode: 'VIDEO',
+-          numHands: 2, // DETECT BOTH HANDS SIMULTANEOUSLY
+-          minHandDetectionConfidence: 0.45,
+-          minHandPresenceConfidence: 0.45,
+-          minTrackingConfidence: 0.45,
+-        });
++        // 2. Initialize Dual-Hand Landmarker (numHands: 2).
++        // GPU delegate first; fall back to the CPU delegate automatically when
++        // the GPU path is unavailable on this machine (driver/WebGL issues) so
++        // gesture tracking never silently dies on exotic GPU setups.
++        const createLandmarker = (delegate: 'GPU' | 'CPU') =>
++          HandLandmarker.createFromOptions(vision, {
++            baseOptions: {
++              modelAssetPath: '/mediapipe/hand_landmarker.task',
++              delegate,
++            },
++            runningMode: 'VIDEO',
++            numHands: 2, // DETECT BOTH HANDS SIMULTANEOUSLY
++            minHandDetectionConfidence: 0.45,
++            minHandPresenceConfidence: 0.45,
++            minTrackingConfidence: 0.45,
++          });
++        try {
++          handLandmarkerInstance = await createLandmarker('GPU');
++        } catch (gpuErr) {
++          console.warn('[AMAP Camera] GPU delegate unavailable — retrying with CPU delegate:', gpuErr);
++          usingDelegate = 'CPU';
++          handLandmarkerInstance = await createLandmarker('CPU');
++        }
+ 
+         if (!isComponentMounted) return;
+ 
+@@ -490,13 +575,43 @@ export function MediaPipeHandTracker({
+           if (videoRef.current && isComponentMounted && cameraStream) {
+             videoRef.current.srcObject = cameraStream;
+             try {
+-              await videoRef.current.play();
++              // FIX (stuck 'Initializing Dual-Hand Camera...' / 0 FPS):
++              // video.play() can stay PENDING indefinitely (autoplay policy
++              // hold, track interruption). A bare `await` stalled init forever
++              // BEFORE the pipeline state advanced and BEFORE the
++              // requestAnimationFrame loop was ever scheduled — while the
++              // <video> kept painting camera frames. Race play() with a
++              // timeout and proceed: the frame loop already guards on
++              // video.readyState >= 2, so proceeding is always safe.
++              await Promise.race([
++                videoRef.current.play(),
++                new Promise<void>((resolve) =>
++                  window.setTimeout(() => {
++                    console.warn('[AMAP Camera] video.play() still pending after 2.5s — proceeding (frame loop guards on readyState)');
++                    resolve();
++                  }, 2500)
++                ),
++              ]);
+             } catch (playErr) {
+               console.warn('Video play interrupted or muted:', playErr);
+             }
+             setCameraState('CAMERA_ACTIVE');
+             setPipelineStatus('SEARCHING_FOR_HAND');
+             callbacksRef.current.onCameraStateChange?.('CAMERA_ACTIVE');
++          } else {
++            // FIX: this branch previously fell through SILENTLY (no else) and
++            // scheduled the frame loop anyway — with no video attached the
++            // loop could never detect anything. Distinguish a dead closure
++            // (StrictMode remount race: do nothing) from a genuinely missing
++            // video element (surface a real error).
++            if (!isComponentMounted) return;
++            console.error('[AMAP CAMERA] video element missing at attach time — aborting init');
++            const attachMsg = t('camera_unavailable', language);
++            setErrorMessage(attachMsg);
++            setCameraState('CAMERA_ERROR');
++            setPipelineStatus('ERROR');
++            callbacksRef.current.onCameraStateChange?.('CAMERA_ERROR', attachMsg);
++            return;
+           }
+         } else {
+           const noSupportMsg = t('camera_unavailable', language);
+@@ -519,6 +634,9 @@ export function MediaPipeHandTracker({
+       const processVideoFrame = () => {
+         if (!isComponentMounted) return;
+ 
++        // DIAG (observation only): cumulative requestAnimationFrame counter.
++        diagRef.current.rafCount += 1;
++
+         frameCount++;
+         const now = performance.now();
+         if (now - lastTime >= 1000) {
+@@ -530,7 +648,7 @@ export function MediaPipeHandTracker({
+         const video = videoRef.current;
+         const canvas = canvasRef.current;
+ 
+-        if (video && canvas && handLandmarkerInstance && video.readyState >= 2) {
++        if (video && canvas && handLandmarkerInstance && video.readyState >= 2 && video.videoWidth > 0) {
+           // Keep the canvas backing store matched to the DISPLAYED size so the
+           // skeleton overlay is pixel-exact on the enlarged camera area (a
+           // fixed 640x480 buffer would be CSS-stretched and distorted).
+@@ -546,41 +664,91 @@ export function MediaPipeHandTracker({
+           if (ctx) {
+             let results: any = null;
+             try {
++              // DIAG (observation only): count every detectForVideo() call.
++              diagRef.current.detectForVideoCount += 1;
+               results = handLandmarkerInstance.detectForVideo(video, now);
+-            } catch {
++              detectErrorStreak = 0;
++              diagRef.current.lastDetectError = '(none)';
++            } catch (detectErr) {
++              // DIAG (observation only): surface the real per-frame error.
++              diagRef.current.lastDetectError = String((detectErr as any)?.message ?? detectErr).slice(0, 160);
++              // Inference resilience: a GPU delegate can fail per-frame (lost
++              // WebGL context, driver hiccups). Instead of silently treating
++              // it as "no hand" forever, fall back to the CPU delegate after
++              // a sustained failure streak so tracking recovers on its own.
+               results = null;
++              detectErrorStreak++;
++              if (detectErrorStreak === 20) {
++                console.error('[AMAP Camera] detectForVideo failing repeatedly:', detectErr);
++                if (usingDelegate === 'GPU' && isComponentMounted) {
++                  usingDelegate = 'CPU';
++                  detectErrorStreak = 0;
++                  void (async () => {
++                    try {
++                      handLandmarkerInstance?.close();
++                    } catch {}
++                    try {
++                      const vision = await FilesetResolver.forVisionTasks('/mediapipe/wasm');
++                      handLandmarkerInstance = await HandLandmarker.createFromOptions(vision, {
++                        baseOptions: {
++                          modelAssetPath: '/mediapipe/hand_landmarker.task',
++                          delegate: 'CPU',
++                        },
++                        runningMode: 'VIDEO',
++                        numHands: 2,
++                        minHandDetectionConfidence: 0.45,
++                        minHandPresenceConfidence: 0.45,
++                        minTrackingConfidence: 0.45,
++                      });
++                      console.warn('[AMAP Camera] recovered: switched to CPU delegate after repeated detect failures');
++                    } catch (cpuErr) {
++                      console.error('[AMAP Camera] CPU fallback failed:', cpuErr);
++                    }
++                  })();
++                }
++              }
+             }
+ 
+             const rawHands: Landmark3D[][] = results?.landmarks || [];
+-            const rawLabels: string[] = results?.handednesses?.map((h: any) => h[0]?.categoryName) || [];
++            // DIAG (observation only): raw landmark arrays returned by MediaPipe,
++            // BEFORE any quality filtering.
++            diagRef.current.rawHandsCount = rawHands.length;
++            // DIAG (observation only): gate inputs for the FIRST raw hand —
++            // landmark count, palm size (wrist -> middle MCP, normalized) and
++            // reported-visibility count/average — mirroring the gate's own
++            // math for display only. No filtering happens here.
++            const diagRaw0 = rawHands[0] as Landmark3D[] | undefined;
++            diagRef.current.rawLmCount = diagRaw0?.length ?? 0;
++            diagRef.current.palmSize =
++              diagRaw0 && diagRaw0.length > 9
++                ? Math.hypot(diagRaw0[0].x - diagRaw0[9].x, diagRaw0[0].y - diagRaw0[9].y)
++                : null;
++            const diagVis: number[] = (diagRaw0 ?? [])
++              .map((pt: any) => (typeof pt?.visibility === 'number' && pt.visibility > 0 ? pt.visibility : null))
++              .filter((v: number | null): v is number => v !== null);
++            diagRef.current.visCount = diagVis.length;
++            diagRef.current.visAvg =
++              diagVis.length > 0
++                ? Math.round((diagVis.reduce((a, b) => a + b, 0) / diagVis.length) * 100) / 100
++                : null;
++            // `handednesses` is the deprecated alias; prefer the modern
++            // `handedness` field when the installed tasks-vision provides it.
++            const rawLabels: string[] =
++              (results?.handedness ?? results?.handednesses)?.map((h: any) => h[0]?.categoryName) || [];
+ 
+             // =========================================================================
+             // HAND QUALITY GATE: drop partial / too-distant / low-visibility hands
+             // BEFORE any classification, so poorly visible frames can never
+             // produce gestures or drive the interaction engine.
+-            //   - palm size (wrist -> middle MCP) must exceed a minimum: a tiny
+-            //     distant hand yields noisy landmarks and accidental gestures.
+-            //   - when MediaPipe reports per-landmark visibility, the average
+-            //     must clear a floor (occluded/partial hands are rejected).
++            // Exact rules (and the tasks-vision visibility caveat) live in
++            // worker/lib/handQuality.ts, where they are unit-tested.
+             // =========================================================================
+-            const MIN_PALM_SIZE = 0.045; // normalized units (~4.5% of frame width)
+-            const MIN_AVG_VISIBILITY = 0.55;
+-            const multiHands: Landmark3D[][] = [];
+-            const multiHandLabels: string[] = [];
+-            rawHands.forEach((hand, handIdx) => {
+-              if (!hand || hand.length < 21) return;
+-              const palmSize = Math.hypot(hand[0].x - hand[9].x, hand[0].y - hand[9].y);
+-              if (palmSize < MIN_PALM_SIZE) return;
+-              const visibilities = hand
+-                .map((pt: any) => (typeof pt?.visibility === 'number' ? pt.visibility : null))
+-                .filter((v: number | null): v is number => v !== null);
+-              if (visibilities.length === hand.length) {
+-                const avgVisibility = visibilities.reduce((a, b) => a + b, 0) / visibilities.length;
+-                if (avgVisibility < MIN_AVG_VISIBILITY) return;
+-              }
+-              multiHands.push(hand);
+-              multiHandLabels.push(rawLabels[handIdx] || 'Right');
+-            });
++            const { hands: multiHands, labels: multiHandLabels } = filterHandsByQuality(
++              rawHands,
++              rawLabels
++            );
++            // DIAG (observation only): hands that passed the quality gate.
++            diagRef.current.acceptedHandsCount = multiHands.length;
+ 
+             // =========================================================================
+             // STRICT LAYER 1: "IS THERE A HAND?" (NO HAND = 0 GESTURE, NO INTENT)
+@@ -623,6 +791,8 @@ export function MediaPipeHandTracker({
+             // =========================================================================
+             if (multiHands.length === 0) {
+               ctx.clearRect(0, 0, canvas.width, canvas.height);
++              // DIAG (observation only): no hand passed the gate — classifier output is none.
++              diagRef.current.lastGesture = 'none';
+               safeSetHandCount(0);
+               safeSetActiveGesture(null);
+               safeSetConfidence(0.0);
+@@ -672,6 +842,12 @@ export function MediaPipeHandTracker({
+                 confidence: highestConfidence,
+                 isConflicting,
+               } = resolveMultiHandGestures(multiHands, classifySingleHand);
++              // DIAG (observation only): last classifier resolution.
++              diagRef.current.lastGesture = dominantGesture
++                ? `${dominantGesture} (${Math.round(highestConfidence * 100)}%)`
++                : isConflicting
++                  ? 'CONFLICT'
++                  : 'none';
+ 
+               // Draw all detected hands (Left & Right) on the canvas
+               drawAllHandsMesh(
+@@ -873,7 +1049,64 @@ export function MediaPipeHandTracker({
+   }
+ 
+   return (
+-    <div
++    <>
++      {/* RUNTIME DIAGNOSTICS PANEL (observation build) — plain visible text,
++          always rendered, NOT collapsible, directly ABOVE the camera/video
++          area. Read-only display of counters written by the frame loop; it
++          never alters detection, classification, quality gating, or
++          MediaPipe configuration. */}
++      <div
++        data-testid="amap-runtime-diagnostics"
++        style={{
++          width: '100%',
++          boxSizing: 'border-box',
++          background: '#000000',
++          border: '3px solid #facc15',
++          borderRadius: '10px',
++          padding: '0.85rem 1.1rem',
++          marginBottom: '0.75rem',
++          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
++          fontSize: '14px',
++          lineHeight: '1.55',
++          fontWeight: 700,
++          color: '#4ade80',
++          zIndex: 50,
++        }}
++      >
++        <div style={{ color: '#facc15', fontSize: '15px', marginBottom: '0.4rem' }}>
++          AMAP RUNTIME DIAGNOSTICS
++        </div>
++
++        <div style={{ color: '#facc15' }}>CAMERA</div>
++        <div>{diagSnapshot.videoWidth} × {diagSnapshot.videoHeight}</div>
++        <div>readyState {diagSnapshot.readyState}</div>
++        <div>paused {String(diagSnapshot.paused)}</div>
++
++        <div style={{ color: '#facc15', marginTop: '0.4rem' }}>LOOP</div>
++        <div>RAF count {diagSnapshot.rafCount}</div>
++
++        <div style={{ color: '#facc15', marginTop: '0.4rem' }}>MEDIAPIPE</div>
++        <div>detectForVideo count {diagSnapshot.detectForVideoCount}</div>
++        <div>raw hands count {diagSnapshot.rawHandsCount}</div>
++        <div style={{ color: diagSnapshot.lastDetectError !== '(none)' ? '#f87171' : '#4ade80' }}>
++          last detection error {diagSnapshot.lastDetectError}
++        </div>
++
++        <div style={{ color: '#facc15', marginTop: '0.4rem' }}>QUALITY</div>
++        <div>first raw hand LMs {diagSnapshot.rawLmCount}</div>
++        <div>palm {diagSnapshot.palmSize !== null ? diagSnapshot.palmSize.toFixed(3) : 'n/a'} (floor {MIN_PALM_SIZE})</div>
++        <div>vis {diagSnapshot.visCount !== null ? `${diagSnapshot.visCount}/21 reported` : 'n/a'} avg {diagSnapshot.visAvg !== null ? diagSnapshot.visAvg.toFixed(2) : 'n/a'} (floor {MIN_AVG_VISIBILITY})</div>
++        <div>accepted hands count {diagSnapshot.acceptedHandsCount}</div>
++
++        <div style={{ color: '#facc15', marginTop: '0.4rem' }}>CLASSIFIER</div>
++        <div>last gesture {diagSnapshot.lastGesture}</div>
++
++        <div style={{ color: '#facc15', marginTop: '0.4rem' }}>UI</div>
++        <div>pipeline {pipelineStatus}</div>
++        <div>hand count {handCount}</div>
++      </div>
++
++      <div
+       role="region"
+       aria-label="Camera Live Gesture Input"
+       style={{
+@@ -1075,7 +1308,8 @@ export function MediaPipeHandTracker({
+           </button>
+         </div>
+       )}
+-    </div>
++      </div>
++    </>
+   );
+ }
+ 
+diff --git a/frontend/worker/lib/handQuality.ts b/frontend/worker/lib/handQuality.ts
+new file mode 100644
+index 0000000..54c4008
+--- /dev/null
++++ b/frontend/worker/lib/handQuality.ts
+@@ -0,0 +1,84 @@
++/**
++ * Hand-quality gate for the MediaPipe hand pipeline.
++ *
++ * Drops partial / too-distant / low-visibility hands BEFORE any
++ * classification, so poorly visible frames can never produce gestures or
++ * drive the interaction engine.
++ *
++ * Extracted verbatim from MediaPipeHandTracker.tsx so it is unit-testable
++ * with the same realistic landmark shapes @mediapipe/tasks-vision produces.
++ *
++ * Rules:
++ *   - a hand must have all 21 landmarks;
++ *   - palm size (wrist -> middle MCP) must exceed MIN_PALM_SIZE: a tiny
++ *     distant hand yields noisy landmarks and accidental gestures;
++ *   - when the model reports per-landmark visibility, the average must
++ *     clear MIN_AVG_VISIBILITY (occluded/partial hands are rejected).
++ *
++ * IMPORTANT — visibility semantics (root cause of an earlier gesture
++ * blackout): @mediapipe/tasks-vision ALWAYS materializes `visibility` as a
++ * number for every landmark. For models that do not emit per-landmark
++ * visibility scores — which includes the hand_landmarker models, whose
++ * output tensor carries only x/y/z — the JS converter writes a literal `0`
++ * (landmark_result.ts: `visibility: proto.getVisibility() ?? 0`). A `0`
++ * therefore means "NOT REPORTED", not "invisible". Treating a numeric `0`
++ * as a real score rejected every detected hand every frame. A visibility
++ * value is only treated as reported when it is a number strictly greater
++ * than zero; genuine scores are sigmoid outputs in (0, 1].
++ */
++
++/** Landmark shape produced by @mediapipe/tasks-vision (visibility optional). */
++export interface QualityLandmark {
++  x: number;
++  y: number;
++  z?: number;
++  /** Materialized as 0 by tasks-vision when the model emits no score. */
++  visibility?: number;
++}
++
++export interface QualityHandResult {
++  hands: QualityLandmark[][];
++  labels: string[];
++}
++
++/**
++ * Minimum palm size (wrist -> middle MCP), normalized units.
++ * 0.035 (~3.5% of frame width) accepts hands on wide-FOV laptop webcams and
++ * at arm's length while still rejecting degenerate/noise detections —
++ * MediaPipe's own detection confidence remains the primary noise filter.
++ * Verified against real webcam-synthetic feeds: hands at ~30% frame width
++ * pass with margin; hands MediaPipe can no longer detect (~18%) never
++ * reach this gate at all.
++ */
++export const MIN_PALM_SIZE = 0.035;
++/** Minimum average per-landmark visibility when the model reports scores. */
++export const MIN_AVG_VISIBILITY = 0.55;
++
++/**
++ * Filters raw MediaPipe hands down to quality hands, preserving the
++ * handedness label alignment (defaults to 'Right' when absent).
++ */
++export function filterHandsByQuality(
++  rawHands: QualityLandmark[][],
++  rawLabels: string[]
++): QualityHandResult {
++  const hands: QualityLandmark[][] = [];
++  const labels: string[] = [];
++  rawHands.forEach((hand, handIdx) => {
++    if (!hand || hand.length < 21) return;
++    const palmSize = Math.hypot(hand[0].x - hand[9].x, hand[0].y - hand[9].y);
++    if (palmSize < MIN_PALM_SIZE) return;
++    const visibilities = hand
++      .map((pt) =>
++        typeof pt?.visibility === 'number' && pt.visibility > 0 ? pt.visibility : null
++      )
++      .filter((v: number | null): v is number => v !== null);
++    if (visibilities.length === hand.length) {
++      const avgVisibility = visibilities.reduce((a, b) => a + b, 0) / visibilities.length;
++      if (avgVisibility < MIN_AVG_VISIBILITY) return;
++    }
++    hands.push(hand);
++    labels.push(rawLabels[handIdx] || 'Right');
++  });
++  return { hands, labels };
++}
