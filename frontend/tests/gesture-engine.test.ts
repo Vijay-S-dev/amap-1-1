@@ -940,6 +940,107 @@ test('contain transform: overlay maps letterboxed video exactly (camera enlargem
 });
 
 // ---------------------------------------------------------------------------
+// Hand-quality gate (worker/lib/handQuality.ts)
+//
+// Regression suite for the gesture blackout: @mediapipe/tasks-vision
+// materializes `visibility: 0` for hand landmarks (the hand model emits
+// x/y/z only), and the gate used to treat any numeric visibility as a real
+// score — rejecting every detected hand, every frame.
+// ---------------------------------------------------------------------------
+import {
+  filterHandsByQuality,
+  MIN_AVG_VISIBILITY,
+  MIN_PALM_SIZE,
+} from '../worker/lib/handQuality';
+
+/** Builds a synthetic 21-landmark hand. Wrist at index 0, middle MCP at 9. */
+function gateHand(opts: { visibility?: number; yStep?: number; count?: number } = {}) {
+  const { visibility, yStep = 0.01, count = 21 } = opts;
+  const hand: { x: number; y: number; z?: number; visibility?: number }[] = [];
+  for (let i = 0; i < count; i++) {
+    const pt: { x: number; y: number; z?: number; visibility?: number } = {
+      x: 0.5,
+      y: 0.7 - i * yStep,
+    };
+    if (visibility !== undefined) pt.visibility = visibility;
+    hand.push(pt);
+  }
+  return hand;
+}
+
+test('quality gate passes the exact tasks-vision hand shape (all visibility === 0)', () => {
+  // THE regression: hand_landmarker output has visibility materialized as 0
+  // for every landmark. This hand MUST pass the gate.
+  const { hands } = filterHandsByQuality([gateHand({ visibility: 0 })], ['Left']);
+  assertEqual(hands.length, 1, 'visibility:0 hand must NOT be rejected');
+});
+
+test('quality gate passes hands with no visibility field at all', () => {
+  const { hands } = filterHandsByQuality([gateHand()], []);
+  assertEqual(hands.length, 1);
+});
+
+test('quality gate passes hands whose model reports good visibility', () => {
+  const { hands } = filterHandsByQuality([gateHand({ visibility: 0.8 })], ['Left']);
+  assertEqual(hands.length, 1);
+});
+
+test('quality gate rejects occluded hands when visibility is genuinely reported low', () => {
+  const { hands } = filterHandsByQuality([gateHand({ visibility: 0.3 })], ['Left']);
+  assertEqual(hands.length, 0, 'avg visibility 0.3 < floor must be rejected');
+  assert(MIN_AVG_VISIBILITY > 0.3 && MIN_AVG_VISIBILITY <= 0.55, 'floor unchanged');
+});
+
+test('quality gate rejects a distant hand (palm size below minimum)', () => {
+  // yStep 0.002 -> wrist->MCP distance 0.018, far below the 0.035 floor
+  const { hands } = filterHandsByQuality([gateHand({ yStep: 0.002 })], ['Left']);
+  assertEqual(hands.length, 0);
+  assert(MIN_PALM_SIZE === 0.035, 'palm threshold = 0.035 (wide-FOV/distance tolerant)');
+});
+
+test('quality gate accepts small-but-real hands in the 0.035-0.045 band (wide-FOV cameras)', () => {
+  // yStep 0.0045 -> wrist->MCP distance 0.0405: a real hand that the old
+  // 0.045 floor rejected on wide-FOV webcams. Must be accepted now.
+  const { hands } = filterHandsByQuality([gateHand({ yStep: 0.0045 })], ['Left']);
+  assertEqual(hands.length, 1, 'palm 0.0405 >= 0.035 floor must be accepted');
+});
+
+test('quality gate rejects partial hands (fewer than 21 landmarks)', () => {
+  const { hands } = filterHandsByQuality([gateHand({ count: 20 })], ['Left']);
+  assertEqual(hands.length, 0);
+});
+
+test('quality gate keeps label alignment and applies the Right default', () => {
+  const { hands, labels } = filterHandsByQuality(
+    [gateHand({ visibility: 0 }), gateHand({ visibility: 0.2 })],
+    ['Left']
+  );
+  assertEqual(hands.length, 1, 'visibility:0 hand passes, genuinely-occluded hand drops');
+  assertEqual(labels.length, 1);
+  assertEqual(labels[0], 'Left', 'label of the surviving hand is preserved');
+  assertEqual(filterHandsByQuality([gateHand({ visibility: 0 })], []).labels[0], 'Right');
+});
+
+test('quality gate handles an empty detection result', () => {
+  const { hands, labels } = filterHandsByQuality([], []);
+  assertEqual(hands.length, 0);
+  assertEqual(labels.length, 0);
+});
+
+test('quality gate accepts mixed visibility (sentinel zeros + real scores)', () => {
+  // tasks-vision materializes visibility: 0 for hand landmarks (the hand model
+  // emits x/y/z only). If a future model build reported REAL scores for only
+  // SOME landmarks, the hand must still pass: the average check only applies
+  // when EVERY landmark reports a real (> 0) score. Locks in the sentinel
+  // semantics that caused the original full blackout.
+  const hand = gateHand({ visibility: 0 });
+  hand[0].visibility = 0.9;
+  hand[9].visibility = 0.85;
+  const { hands } = filterHandsByQuality([hand], ['Left']);
+  assertEqual(hands.length, 1, 'mixed sentinel/real visibility must not blackout');
+});
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 
